@@ -1,0 +1,1041 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>WATCH OUT FOR THE GLASS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --fondo: #0a1530;
+    --tinta: #f4f6f8;
+    color-scheme: light;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --fondo: #03060d; --tinta: #f4f6f8; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --fondo: #03060d; --tinta: #f4f6f8; color-scheme: dark; }
+  html { height: 100%; overflow: hidden; scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: var(--fondo);
+    color: var(--tinta);
+    font-family: "Press Start 2P", "Courier New", monospace;
+  }
+  #juego {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #juego canvas { image-rendering: crisp-edges; image-rendering: pixelated; outline: none; }
+  #cargando {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+    letter-spacing: 0;
+  }
+</style>
+</head>
+<body>
+<div id="juego"><div id="cargando">LOADING...</div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+<script>
+(() => {
+'use strict';
+
+// ============================================================
+// CONFIGURACIÓN
+// ============================================================
+const ANCHO = 480, ALTO = 256; // proporción 15:8
+const FUENTE = '"Press Start 2P", "Courier New", monospace';
+
+const C = {
+  blanco: '#F4F6F8', sombra: '#B9C0C8', oscuro: '#3A3F47', piel: '#C99E86',
+  negro: '#121418', celeste: '#2BB3E6', azul: '#0B5FA5', noche: '#0A1530',
+  cristal: '#A8E8F7', amarillo: '#FFD23F', coral: '#FF6B6B'
+};
+const hex = s => parseInt(s.slice(1), 16);
+
+const CONST = Object.freeze({
+  VIDAS: 3, MIN_PLAT: 10, MAX_PLAT: 15,
+  FILA: 44, X1: 212, X2: 268, XC: 240, SALTO_MS: 420
+});
+
+// All visible texts: neutral English, UPPERCASE.
+const TEXTOS = Object.freeze({
+  titulo1: 'WATCH OUT',
+  titulo2: 'FOR THE GLASS',
+  jugar: 'PLAY',
+  instruccion: ['USE ', '←', ' AND ', '→', ' TO CHOOSE A GLASS AND ', '↑', ' TO JUMP'],
+  vidas: 'LIVES',
+  plataforma: (x, n) => `PLATFORM ${x} OF ${n}`,
+  cristal1: 'GLASS 1',
+  cristal2: 'GLASS 2',
+  saltar: 'JUMP',
+  avisoElegir: 'CHOOSE A GLASS',
+  avisoBien: 'GREAT!',
+  avisoRoto: 'OOPS! THE GLASS BROKE',
+  felicidades1: 'CONGRATULATIONS!',
+  felicidades2: 'YOU CROSSED THE BRIDGE!',
+  reiniciar: 'RESTART',
+  perdiste: 'YOU LOST!',
+  volver: 'TRY AGAIN',
+  error: 'COULD NOT LOAD THE GAME'
+});
+
+// <logica> ====================================================
+// LÓGICA PURA (sin Phaser)
+// ============================================================
+
+// Aleatorio con semilla opcional (?semilla=123 o #semilla-123)
+function crearRng(semilla) {
+  if (semilla === null || semilla === undefined) return Math.random;
+  let a = semilla >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const entero = (r, min, max) => min + Math.floor(r() * (max - min + 1));
+const elegirAlAzar = (r, lista) => lista[Math.floor(r() * lista.length)];
+const lado = r => (r() < 0.5 ? 1 : 2);
+const otro = v => (v === 1 ? 2 : 1);
+
+// Los 5 patrones. Cada uno devuelve un array de largo n con 1|2 (cristal que resiste).
+const PATRONES = [
+  {
+    id: 'ALTERNADO', nombre: 'ALTERNADO',
+    generar(n, r) { const s = lado(r); return Array.from({ length: n }, (_, i) => (i % 2 === 0 ? s : otro(s))); }
+  },
+  {
+    id: 'ESPEJO', nombre: 'ESPEJO',
+    generar(n, r) {
+      const mitad = Array.from({ length: Math.floor(n / 2) }, () => lado(r));
+      const centro = n % 2 ? [lado(r)] : [];
+      return [...mitad, ...centro, ...mitad.slice().reverse()];
+    }
+  },
+  {
+    id: 'BLOQUES_2', nombre: 'BLOQUES DE 2',
+    generar(n, r) { const s = lado(r); return Array.from({ length: n }, (_, i) => (Math.floor(i / 2) % 2 === 0 ? s : otro(s))); }
+  },
+  {
+    id: 'SESGADO', nombre: 'SESGADO',
+    generar(n, r) {
+      const fav = lado(r);
+      const a = Array.from({ length: n }, () => (r() < 0.75 ? fav : otro(fav)));
+      let otros = a.filter(v => v !== fav).length;
+      while (otros < 2) {
+        const i = Math.floor(r() * n);
+        if (a[i] === fav) { a[i] = otro(fav); otros++; }
+      }
+      return a;
+    }
+  },
+  {
+    id: 'PSEUDOALEATORIO', nombre: 'PSEUDOALEATORIO',
+    generar(n, r) {
+      const a = [];
+      for (let i = 0; i < n; i++) {
+        let v = lado(r);
+        if (i >= 3 && a[i - 1] === v && a[i - 2] === v && a[i - 3] === v) v = otro(v);
+        a.push(v);
+      }
+      return a;
+    }
+  }
+];
+
+function generarPuente(patronAnterior, r) {
+  const candidatos = PATRONES.filter(p => p.id !== patronAnterior);
+  const patron = elegirAlAzar(r, candidatos);
+  const n = entero(r, CONST.MIN_PLAT, CONST.MAX_PLAT);
+  const secuencia = patron.generar(n, r);
+  if (secuencia.length !== n || secuencia.some(v => v !== 1 && v !== 2)) {
+    throw new Error('Puente inválido: ' + patron.id);
+  }
+  const puente = secuencia.map((res, i) => ({ indice: i + 1, resistente: res, rotos: [] }));
+  return { patronId: patron.id, totalPlataformas: n, puente, secuencia };
+}
+// </logica> ===================================================
+
+function leerSemilla() {
+  try {
+    const q = new URLSearchParams(location.search).get('semilla');
+    if (q !== null && /^\d+$/.test(q)) return Number(q);
+    const m = /semilla-?(\d+)/.exec(location.hash || '');
+    if (m) return Number(m[1]);
+  } catch (e) { /* sin semilla */ }
+  return null;
+}
+const RNG = crearRng(leerSemilla());
+
+// ============================================================
+// SONIDO (sintetizado con WebAudio, sin archivos)
+// ============================================================
+const Sonido = {
+  ctx: null, master: null,
+  init() {
+    try {
+      if (!this.ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        this.ctx = new AC();
+        this.master = this.ctx.createGain();
+        this.master.gain.value = 0.55;
+        this.master.connect(this.ctx.destination);
+      }
+      if (this.ctx.state === 'suspended') this.ctx.resume();
+    } catch (e) { /* sin audio */ }
+  },
+  tono(f, dur, o = {}) {
+    if (!this.ctx) return;
+    const { tipo = 'square', vol = 0.12, hasta = null, retraso = 0 } = o;
+    const t = this.ctx.currentTime + retraso;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = tipo;
+    osc.frequency.setValueAtTime(f, t);
+    if (hasta) osc.frequency.exponentialRampToValueAtTime(hasta, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g); g.connect(this.master);
+    osc.start(t); osc.stop(t + dur + 0.03);
+  },
+  ruido(dur, o = {}) {
+    if (!this.ctx) return;
+    const { vol = 0.18, filtro = 2500, retraso = 0 } = o;
+    const t = this.ctx.currentTime + retraso;
+    const len = Math.floor(this.ctx.sampleRate * dur);
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const f = this.ctx.createBiquadFilter();
+    f.type = 'highpass'; f.frequency.value = filtro;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f); f.connect(g); g.connect(this.master);
+    src.start(t);
+  },
+  clic() { this.tono(1320, 0.04, { vol: 0.06 }); },
+  bip() { this.tono(880, 0.07, { vol: 0.07 }); },
+  boing() { this.tono(196, 0.28, { tipo: 'triangle', hasta: 523, vol: 0.22 }); },
+  ding() {
+    this.tono(1047, 0.12, { vol: 0.06 });
+    this.tono(1568, 0.24, { vol: 0.06, retraso: 0.09 });
+  },
+  crack() {
+    this.ruido(0.22, { vol: 0.16, filtro: 2600 });
+    [2637, 3136, 3520, 2794].forEach((f, i) => this.tono(f, 0.14, { tipo: 'sine', vol: 0.05, retraso: 0.04 + i * 0.05 }));
+  },
+  fiuu() { this.tono(880, 0.85, { tipo: 'sine', hasta: 170, vol: 0.14 }); },
+  pop() { this.tono(500, 0.09, { tipo: 'sine', hasta: 1100, vol: 0.16 }); },
+  fanfarria() {
+    [[523, 0], [659, 0.12], [784, 0.24], [1047, 0.36], [784, 0.52], [1047, 0.62]]
+      .forEach(([f, d], i) => this.tono(f, i === 5 ? 0.55 : 0.14, { vol: 0.07, retraso: d }));
+  },
+  wawa() {
+    this.tono(392, 0.3, { tipo: 'triangle', hasta: 370, vol: 0.2 });
+    this.tono(349, 0.3, { tipo: 'triangle', hasta: 330, vol: 0.2, retraso: 0.32 });
+    this.tono(311, 0.75, { tipo: 'triangle', hasta: 262, vol: 0.2, retraso: 0.64 });
+  }
+};
+// El navegador solo permite audio tras un gesto: lo desbloqueamos en el primer toque o tecla.
+window.addEventListener('pointerdown', () => Sonido.init(), true);
+window.addEventListener('keydown', () => Sonido.init(), true);
+
+// ============================================================
+// UTILIDADES DE DIBUJO
+// ============================================================
+function texturaPixel(s, key, filas, paleta, esc = 1) {
+  if (s.textures.exists(key)) return;
+  const h = filas.length, w = Math.max(...filas.map(f => f.length));
+  const t = s.textures.createCanvas(key, w * esc, h * esc);
+  const ctx = t.getContext();
+  filas.forEach((fila, y) => [...fila].forEach((ch, x) => {
+    const col = paleta[ch];
+    if (!col) return;
+    ctx.fillStyle = col;
+    ctx.fillRect(x * esc, y * esc, esc, esc);
+  }));
+  t.refresh();
+}
+
+function texturaCanvas(s, key, w, h, dibujar) {
+  if (s.textures.exists(key)) return;
+  const t = s.textures.createCanvas(key, w, h);
+  dibujar(t.getContext(), w, h);
+  t.refresh();
+}
+
+function texturaBoton(s, key, w, h, relleno, sombraCol, presionado) {
+  texturaCanvas(s, key, w, h, ctx => {
+    ctx.fillStyle = C.negro;
+    ctx.fillRect(2, 0, w - 4, h);
+    ctx.fillRect(0, 2, w, h - 4);
+    if (presionado) {
+      ctx.fillStyle = sombraCol; ctx.fillRect(2, 2, w - 4, 2);
+      ctx.fillStyle = relleno; ctx.fillRect(2, 4, w - 4, h - 6);
+      ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fillRect(4, 6, w - 8, 1);
+    } else {
+      ctx.fillStyle = sombraCol; ctx.fillRect(2, 2, w - 4, h - 4);
+      ctx.fillStyle = relleno; ctx.fillRect(2, 2, w - 4, h - 8);
+      ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillRect(4, 4, w - 8, 1);
+    }
+  });
+}
+
+function txt(s, x, y, texto, tam = 8, color = C.blanco, sombra = true) {
+  const o = s.add.text(x, y, texto, { fontFamily: FUENTE, fontSize: tam + 'px', color });
+  if (sombra) { const d = tam >= 16 ? 2 : 1; o.setShadow(d, d, C.negro, 0, true, true); }
+  return o;
+}
+
+// Botón pixel: imagen + icono opcional + texto. Devuelve { partes, presionar }.
+function crearBoton(s, x, y, op) {
+  const { w, h, estilo = 'blanco', texto, tam = 8, icono = null, fijo = false, profundidad = 0, alPresionar } = op;
+  const rel = estilo === 'amarillo' ? C.amarillo : C.blanco;
+  const som = estilo === 'amarillo' ? '#B8901A' : C.sombra;
+  const k = `btn_${estilo}_${w}x${h}`;
+  texturaBoton(s, k, w, h, rel, som, false);
+  texturaBoton(s, k + '_p', w, h, rel, som, true);
+
+  const img = s.add.image(x, y, k).setInteractive({ useHandCursor: true });
+  const partes = [img];
+  if (icono) {
+    partes.push(s.add.image(x, y - 8, icono));
+    partes.push(txt(s, x, y + 6, texto, tam, C.negro, false).setOrigin(0.5));
+  } else {
+    partes.push(txt(s, x, y - 2, texto, tam, C.negro, false).setOrigin(0.5));
+  }
+  const baseY = partes.map(o => o.y);
+  partes.forEach(o => { o.setDepth(profundidad); if (fijo) o.setScrollFactor(0); });
+
+  const soltar = () => {
+    if (!img.scene) return;
+    img.setTexture(k);
+    partes.forEach((o, i) => { if (o !== img) o.y = baseY[i]; });
+  };
+  const presionar = () => {
+    img.setTexture(k + '_p');
+    partes.forEach((o, i) => { if (o !== img) o.y = baseY[i] + 3; });
+    s.time.delayedCall(110, soltar);
+  };
+  img.on('pointerdown', () => { presionar(); alPresionar(); });
+  return { partes, presionar, img };
+}
+
+// Línea de texto con iconos de flecha intercalados, centrada en x.
+function lineaConIconos(s, y, partes, profundidad = 0) {
+  const ICONOS = { '←': 'flechaIzqW', '→': 'flechaDerW', '↑': 'flechaArrW' };
+  const objs = partes.map(p => (ICONOS[p]
+    ? s.add.image(0, y, ICONOS[p]).setOrigin(0, 0.5)
+    : txt(s, 0, y, p, 8).setOrigin(0, 0.5)));
+  const total = objs.reduce((a, o) => a + o.width, 0);
+  let x = Math.round(ANCHO / 2 - total / 2);
+  objs.forEach(o => { o.x = x; x += o.width; o.setDepth(profundidad); });
+  return objs;
+}
+
+// ============================================================
+// TEXTURAS (todo el pixel art se genera en código)
+// ============================================================
+function crearTexturas(s) {
+  const P = {
+    '.': null, W: C.blanco, S: C.sombra, D: C.oscuro, F: C.piel, G: '#A9826C',
+    K: C.negro, C: C.celeste, V: C.cristal, Y: C.amarillo, R: C.coral, P: '#FFC2C2'
+  };
+
+  // Astronauta 16x16 escalado x2 = 32x32
+  const ASTRO = [
+    '....WWWWWWWS....',
+    '..WWWWWWWWWWWS..',
+    '.WWWWWWWWWWWWWS.',
+    '.WWVVVVVVVVVVWS.',
+    'WWVFFFFFFFFFGVWS',
+    'WWVFKFFFFFKFGVWS',
+    'WWVFKFFFFFKFGVWS',
+    'WWVFFFFFFFFFGVWS',
+    '.WWVVVVVVVVVVWS.',
+    '..WWWWWWWWWWWS..',
+    '.DDWWWWCCWWWSDD.',
+    '.DDWWWWCCWWWSDD.',
+    '..DSWWWWWWWWSD..',
+    '...WWWWSSWWWS...',
+    '...WWWS..WWWS...',
+    '...DDDD..DDDD...'
+  ];
+  texturaPixel(s, 'astro', ASTRO, P, 2);
+  const PARPADEO = ASTRO.slice();
+  PARPADEO[5] = 'WWVFFFFFFFFFGVWS';
+  texturaPixel(s, 'astroParpadeo', PARPADEO, P, 2);
+  const SALTO = ASTRO.slice(0, 8).concat([
+    'DWWVVVVVVVVVVWSD',
+    'D.WWWWWWWWWWWS.D',
+    '..WWWWWCCWWWWS..',
+    '..WWWWWCCWWWWS..',
+    '...WWWWWWWWWS...',
+    '...WWWWWWWWWS...',
+    '....WWWSWWWS....',
+    '....DDD..DDD....'
+  ]);
+  texturaPixel(s, 'astroSalto', SALTO, P, 2);
+
+  // Corazones 7x6 x2
+  const COR = ['.RR.RR.', 'RPRRRRR', 'RRRRRRR', '.RRRRR.', '..RRR..', '...R...'];
+  texturaPixel(s, 'corazon', COR, P, 2);
+  texturaPixel(s, 'corazonGris', COR.map(f => f.replace(/[RP]/g, 'D')), P, 2);
+
+  // Flechas 8x8 (blancas x1 para textos, negras x2 para botones)
+  const IZQ = ['...X....', '..XX....', '.XXXXXXX', 'XXXXXXXX', '.XXXXXXX', '..XX....', '...X....', '........'];
+  const DER = IZQ.map(f => [...f].reverse().join(''));
+  const ARR = [...IZQ[0]].map((_, x) => IZQ.map(f => f[x]).join(''));
+  [['W', 1], ['K', 2]].forEach(([col, esc]) => {
+    texturaPixel(s, 'flechaIzq' + col, IZQ.map(f => f.replace(/X/g, col)), P, esc);
+    texturaPixel(s, 'flechaDer' + col, DER.map(f => f.replace(/X/g, col)), P, esc);
+    texturaPixel(s, 'flechaArr' + col, ARR.map(f => f.replace(/X/g, col)), P, esc);
+  });
+
+  // Estrella 7x7
+  texturaPixel(s, 'estrella', ['...Y...', '..YYY..', 'YYYYYYY', '.YYYYY.', '..YYY..', '.YY.YY.', 'Y.....Y'], P, 1);
+
+  texturaCanvas(s, 'confeti', 3, 3, ctx => { ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, 3, 3); });
+  texturaCanvas(s, 'fragmento', 4, 4, ctx => {
+    ctx.fillStyle = C.cristal; ctx.fillRect(0, 0, 4, 4);
+    ctx.fillStyle = C.blanco; ctx.fillRect(0, 0, 1, 1);
+    ctx.fillStyle = C.celeste; ctx.fillRect(3, 3, 1, 1);
+  });
+  texturaCanvas(s, 'sombra', 22, 6, ctx => {
+    ctx.fillStyle = 'rgba(18,20,24,0.45)';
+    ctx.fillRect(4, 0, 14, 6); ctx.fillRect(2, 1, 18, 4); ctx.fillRect(0, 2, 22, 2);
+  });
+
+  // Cristal 40x24
+  texturaCanvas(s, 'cristal', 40, 24, ctx => {
+    ctx.fillStyle = 'rgba(168,232,247,0.5)'; ctx.fillRect(2, 2, 36, 20);
+    ctx.fillStyle = C.celeste;
+    ctx.fillRect(0, 0, 40, 2); ctx.fillRect(0, 22, 40, 2); ctx.fillRect(0, 0, 2, 24); ctx.fillRect(38, 0, 2, 24);
+    ctx.fillStyle = 'rgba(244,246,248,0.85)';
+    for (let i = 0; i < 12; i++) ctx.fillRect(5 + i, 19 - i, 1, 1);
+    for (let i = 0; i < 6; i++) ctx.fillRect(12 + i, 19 - i, 1, 1);
+    ctx.fillStyle = C.blanco; ctx.fillRect(34, 4, 2, 1); ctx.fillRect(35, 3, 1, 3);
+  });
+  texturaCanvas(s, 'cristalRoto', 40, 24, ctx => {
+    ctx.fillStyle = C.celeste;
+    [[0, 0, 12, 2], [18, 0, 8, 2], [31, 0, 9, 2], [0, 22, 9, 2], [15, 22, 13, 2], [33, 22, 7, 2],
+     [0, 0, 2, 9], [0, 14, 2, 10], [38, 0, 2, 6], [38, 12, 2, 12]].forEach(r => ctx.fillRect(...r));
+    ctx.fillStyle = 'rgba(168,232,247,0.6)';
+    for (let k = 0; k < 7; k++) ctx.fillRect(2, 2 + k, 8 - k, 1);
+    for (let k = 0; k < 6; k++) ctx.fillRect(31 + k, 2 + k, 7 - k, 1);
+    for (let k = 0; k < 6; k++) ctx.fillRect(2, 21 - k, 7 - k, 1);
+    for (let k = 0; k < 7; k++) ctx.fillRect(31 + k, 21 - k, 7 - k, 1);
+    ctx.fillStyle = C.blanco;
+    [[10, 3], [11, 4], [12, 5], [28, 18], [27, 19], [3, 12], [36, 10]].forEach(([x, y]) => ctx.fillRect(x, y, 1, 1));
+  });
+  texturaCanvas(s, 'marcador', 48, 32, ctx => {
+    ctx.fillStyle = C.amarillo;
+    [[0, 0, 10, 2], [0, 0, 2, 8], [38, 0, 10, 2], [46, 0, 2, 8],
+     [0, 30, 10, 2], [0, 24, 2, 8], [38, 30, 10, 2], [46, 24, 2, 8]].forEach(r => ctx.fillRect(...r));
+  });
+
+  // Bases de inicio y llegada 140x36
+  const dibujarBase = (llegada) => (ctx, w, h) => {
+    ctx.fillStyle = C.negro; ctx.fillRect(2, 0, w - 4, h); ctx.fillRect(0, 2, w, h - 4);
+    ctx.fillStyle = C.sombra; ctx.fillRect(2, 2, w - 4, h - 4);
+    ctx.fillStyle = C.blanco; ctx.fillRect(2, 2, w - 4, 1);
+    ctx.fillStyle = '#9AA2AC'; ctx.fillRect(46, 3, 1, h - 6); ctx.fillRect(93, 3, 1, h - 6);
+    ctx.fillStyle = C.oscuro;
+    [[5, 15], [w - 7, 15], [5, 21], [w - 7, 21]].forEach(([x, y]) => ctx.fillRect(x, y, 2, 2));
+    const yb = llegada ? h - 9 : 3;
+    for (let x = 2; x < w - 2; x++) {
+      for (let y = yb; y < yb + 6; y++) {
+        ctx.fillStyle = ((x + y) >> 2) & 1 ? C.amarillo : C.oscuro;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+    if (llegada) {
+      ctx.fillStyle = C.oscuro; ctx.fillRect(52, 5, 36, 20);
+      ctx.fillStyle = C.celeste; ctx.fillRect(54, 7, 32, 16);
+      ctx.fillStyle = 'rgba(244,246,248,0.6)'; ctx.fillRect(56, 9, 28, 2);
+      ctx.fillStyle = C.azul; ctx.fillRect(69, 7, 2, 16);
+    }
+  };
+  texturaCanvas(s, 'baseInicio', 140, 36, dibujarBase(false));
+  texturaCanvas(s, 'baseLlegada', 140, 36, dibujarBase(true));
+
+  // Muros de la estación (tile 150x128, el derecho es espejo)
+  const dibujarMuro = espejo => (ctx, w, h) => {
+    if (espejo) { ctx.translate(w, 0); ctx.scale(-1, 1); }
+    ctx.fillStyle = C.azul; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#08487D'; ctx.fillRect(0, 0, w, 2); ctx.fillRect(0, 64, w, 2); ctx.fillRect(72, 0, 2, h);
+    ctx.fillStyle = '#1C77C2'; ctx.fillRect(0, 2, w, 1); ctx.fillRect(0, 66, w, 1); ctx.fillRect(74, 0, 1, h);
+    // ventana con estrellas
+    ctx.fillStyle = C.oscuro; ctx.fillRect(12, 12, 48, 38);
+    ctx.fillStyle = C.noche; ctx.fillRect(15, 15, 42, 32);
+    ctx.fillStyle = C.blanco;
+    [[20, 20], [33, 27], [48, 19], [26, 40], [52, 42], [41, 35]].forEach(([x, y]) => ctx.fillRect(x, y, 1, 1));
+    ctx.fillStyle = C.amarillo; ctx.fillRect(44, 24, 1, 1);
+    ctx.fillStyle = C.coral; ctx.fillRect(22, 30, 4, 4);
+    ctx.fillStyle = '#FFC2C2'; ctx.fillRect(22, 30, 2, 1);
+    ctx.fillStyle = 'rgba(244,246,248,0.18)';
+    for (let i = 0; i < 14; i++) ctx.fillRect(40 + i, 44 - i * 2, 2, 2);
+    // rejilla
+    ctx.fillStyle = '#08487D';
+    for (let i = 0; i < 5; i++) ctx.fillRect(14, 78 + i * 8, 44, 3);
+    // circuitos
+    ctx.fillStyle = 'rgba(244,246,248,0.35)';
+    const linea = (x, y, w2, h2) => ctx.fillRect(x, y, w2, h2);
+    const anillo = (x, y) => { linea(x, y, 5, 1); linea(x, y + 4, 5, 1); linea(x, y, 1, 5); linea(x + 4, y, 1, 5); };
+    linea(84, 16, 36, 1); linea(120, 16, 1, 28); anillo(118, 44);
+    linea(84, 30, 18, 1); linea(102, 30, 1, 22); anillo(100, 52);
+    linea(86, 84, 30, 1); linea(116, 84, 1, 24); anillo(114, 108);
+    linea(86, 98, 14, 1); anillo(82, 96);
+    anillo(82, 14); anillo(82, 28);
+    // luz y borde de seguridad
+    ctx.fillStyle = 'rgba(43,179,230,0.35)'; ctx.fillRect(127, 0, 3, h);
+    ctx.fillStyle = C.celeste; ctx.fillRect(130, 0, 2, h);
+    for (let x = 134; x < 149; x++) {
+      for (let y = 0; y < h; y++) {
+        ctx.fillStyle = ((x + y) >> 3) & 1 ? C.amarillo : C.oscuro;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+    ctx.fillStyle = C.negro; ctx.fillRect(149, 0, 1, h);
+  };
+  texturaCanvas(s, 'muroI', 150, 128, dibujarMuro(false));
+  texturaCanvas(s, 'muroD', 150, 128, dibujarMuro(true));
+
+  // Campo de estrellas 160x160 (determinista)
+  texturaCanvas(s, 'estrellas', 160, 160, ctx => {
+    ctx.fillStyle = C.noche; ctx.fillRect(0, 0, 160, 160);
+    let semilla = 7;
+    const r = () => (semilla = (semilla * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 46; i++) {
+      const x = Math.floor(r() * 160), y = Math.floor(r() * 160), k = r();
+      ctx.fillStyle = k < 0.7 ? C.blanco : k < 0.85 ? C.celeste : C.amarillo;
+      ctx.globalAlpha = 0.45 + r() * 0.55;
+      ctx.fillRect(x, y, k > 0.93 ? 2 : 1, k > 0.93 ? 2 : 1);
+    }
+    ctx.globalAlpha = 1;
+  });
+}
+
+function prepararTeclas(s, mapa) {
+  const kb = s.input.keyboard;
+  kb.removeAllKeys(true);
+  Object.entries(mapa).forEach(([codigo, fn]) => {
+    const k = kb.addKey(codigo);
+    k.on('down', (_k, ev) => { if (ev && ev.repeat) return; fn(); });
+  });
+  s.events.once('shutdown', () => kb.removeAllKeys(true));
+}
+
+// ============================================================
+// ESCENAS
+// ============================================================
+class EscenaCarga extends Phaser.Scene {
+  constructor() { super('Carga'); }
+  create() {
+    crearTexturas(this);
+    const aviso = document.getElementById('cargando');
+    if (aviso) aviso.remove();
+    this.scene.start('Menu');
+  }
+}
+
+class EscenaMenu extends Phaser.Scene {
+  constructor() { super('Menu'); }
+  create() {
+    this.saliendo = false;
+    this.estrellas = this.add.tileSprite(0, 0, ANCHO, ALTO, 'estrellas').setOrigin(0);
+    this.add.tileSprite(0, 0, 150, ALTO, 'muroI').setOrigin(0);
+    this.add.tileSprite(330, 0, 150, ALTO, 'muroD').setOrigin(0);
+
+    this.add.image(196, 160, 'cristal').setScale(2);
+    this.add.image(284, 160, 'cristal').setScale(2);
+    const astro = this.add.image(240, 160, 'astro').setScale(2).setOrigin(0.5, 0.9);
+    this.tweens.add({ targets: astro, y: 152, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    this.time.addEvent({
+      delay: 2600, loop: true,
+      callback: () => { astro.setTexture('astroParpadeo'); this.time.delayedCall(140, () => astro.setTexture('astro')); }
+    });
+
+    [[TEXTOS.titulo1, 34], [TEXTOS.titulo2, 64]].forEach(([t, y]) => {
+      txt(this, 240, y, t, 24, C.amarillo, false)
+        .setOrigin(0.5)
+        .setStroke(C.negro, 6)
+        .setShadow(0, 4, C.azul, 0, true, true);
+    });
+
+    crearBoton(this, 240, 206, {
+      w: 160, h: 36, estilo: 'amarillo', texto: TEXTOS.jugar, tam: 16,
+      alPresionar: () => this.iniciar()
+    });
+
+    this.add.rectangle(0, 233, ANCHO, 22, hex(C.noche), 0.9).setOrigin(0);
+    lineaConIconos(this, 244, TEXTOS.instruccion);
+
+    prepararTeclas(this, { ENTER: () => this.iniciar(), SPACE: () => this.iniciar() });
+    this.cameras.main.fadeIn(300, 10, 21, 48);
+  }
+  iniciar() {
+    if (this.saliendo) return;
+    this.saliendo = true;
+    Sonido.init(); Sonido.clic();
+    this.cameras.main.fadeOut(220, 10, 21, 48);
+    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('Juego'));
+  }
+  update() { this.estrellas.tilePositionY -= 0.15; }
+}
+
+class EscenaJuego extends Phaser.Scene {
+  constructor() { super('Juego'); }
+
+  create() {
+    this.bloqueado = false;
+    const anterior = this.registry.get('patronAnterior') || null;
+    const gen = generarPuente(anterior, RNG);
+    this.registry.set('patronAnterior', gen.patronId);
+
+    const e = this.est = {
+      estado: 'JUGANDO', subestado: 'ELIGIENDO',
+      patronId: gen.patronId, patronAnterior: anterior,
+      totalPlataformas: gen.totalPlataformas, puente: gen.puente,
+      posicion: 0, seleccion: null, vidas: CONST.VIDAS
+    };
+    console.info('[CUIDADO CON EL CRISTAL]', e.patronId, e.totalPlataformas, gen.secuencia.join(''));
+
+    const N = e.totalPlataformas, F = CONST.FILA;
+    this.inicioY = (N + 1) * F + 220;
+    this.llegadaY = this.inicioY - (N + 1) * F;
+    const altoMundo = this.inicioY + 220;
+
+    // Fondo
+    this.estrellas = this.add.tileSprite(0, 0, ANCHO, ALTO, 'estrellas').setOrigin(0).setScrollFactor(0).setDepth(0);
+    this.add.tileSprite(0, 0, 150, altoMundo, 'muroI').setOrigin(0).setDepth(1);
+    this.add.tileSprite(330, 0, 150, altoMundo, 'muroD').setOrigin(0).setDepth(1);
+
+    // Vigas del puente
+    const g = this.add.graphics().setDepth(2);
+    const largo = this.inicioY - this.llegadaY;
+    [189, 240, 291].forEach(x => {
+      g.fillStyle(hex(C.oscuro)); g.fillRect(x - 2, this.llegadaY, 4, largo);
+      g.fillStyle(hex(C.sombra)); g.fillRect(x - 2, this.llegadaY, 1, largo);
+    });
+
+    // Bases y cristales
+    this.add.image(CONST.XC, this.inicioY, 'baseInicio').setDepth(3);
+    this.add.image(CONST.XC, this.llegadaY, 'baseLlegada').setDepth(3);
+    this.cristales = e.puente.map(p => {
+      const y = this.yPos(p.indice);
+      return {
+        1: this.add.image(CONST.X1, y, 'cristal').setDepth(3),
+        2: this.add.image(CONST.X2, y, 'cristal').setDepth(3)
+      };
+    });
+
+    // Astronauta
+    this.sombra = this.add.image(CONST.XC, this.inicioY + 4, 'sombra').setDepth(4);
+    this.astro = this.add.image(CONST.XC, this.inicioY, 'astro').setOrigin(0.5, 0.9).setDepth(5);
+    this.marcador = this.add.image(0, 0, 'marcador').setDepth(4).setVisible(false);
+    this.tweens.add({ targets: this.marcador, alpha: 0.35, duration: 380, yoyo: true, repeat: -1 });
+    this.time.addEvent({ delay: 2600, loop: true, callback: () => this.parpadear() });
+
+    this.crearHud();
+    prepararTeclas(this, {
+      LEFT: () => this.accion('IZQ', true),
+      RIGHT: () => this.accion('DER', true),
+      UP: () => this.accion('ARR', true)
+    });
+
+    this.cameras.main.centerOn(CONST.XC, this.inicioY - 40);
+    this.cameras.main.fadeIn(260, 10, 21, 48);
+    this.actualizarHud();
+    this.time.delayedCall(500, () => { if (this.est.seleccion === null) this.aviso(TEXTOS.avisoElegir, C.amarillo); });
+  }
+
+  update() { this.estrellas.tilePositionY = this.cameras.main.scrollY * 0.3; }
+
+  // ---------- posiciones ----------
+  yPos(p) { return this.inicioY - p * CONST.FILA; }
+  xPos(p) {
+    if (p === 0) return CONST.XC;
+    return this.est.puente[p - 1].resistente === 1 ? CONST.X1 : CONST.X2;
+  }
+  xCristal(lado) { return lado === 1 ? CONST.X1 : CONST.X2; }
+
+  // ---------- HUD ----------
+  crearHud() {
+    const D = 100;
+    const g = this.add.graphics().setScrollFactor(0).setDepth(D);
+    g.fillStyle(hex(C.noche), 0.9); g.fillRect(0, 0, ANCHO, 22); g.fillRect(0, 210, ANCHO, 46);
+    g.fillStyle(hex(C.celeste), 1); g.fillRect(0, 22, ANCHO, 1); g.fillRect(0, 209, ANCHO, 1);
+
+    txt(this, 8, 8, TEXTOS.vidas, 8).setScrollFactor(0).setDepth(D);
+    this.corazones = [0, 1, 2].map(i => this.add.image(62 + i * 18, 11, 'corazon').setScrollFactor(0).setDepth(D));
+    this.txtPlat = txt(this, 472, 8, '', 8).setOrigin(1, 0).setScrollFactor(0).setDepth(D);
+    this.txtAviso = txt(this, 240, 46, '', 16).setOrigin(0.5).setScrollFactor(0).setDepth(D).setAlpha(0).setStroke(C.negro, 4);
+
+    const boton = (x, texto, icono, accion) => crearBoton(this, x, 233, {
+      w: 104, h: 38, estilo: 'blanco', texto, tam: 8, icono, fijo: true, profundidad: D,
+      alPresionar: () => this.accion(accion, false)
+    });
+    this.botones = {
+      IZQ: boton(120, TEXTOS.cristal1, 'flechaIzqK', 'IZQ'),
+      ARR: boton(240, TEXTOS.saltar, 'flechaArrK', 'ARR'),
+      DER: boton(360, TEXTOS.cristal2, 'flechaDerK', 'DER')
+    };
+  }
+
+  actualizarHud() {
+    this.txtPlat.setText(TEXTOS.plataforma(this.est.posicion, this.est.totalPlataformas));
+  }
+
+  aviso(texto, color) {
+    const t = this.txtAviso;
+    this.tweens.killTweensOf(t);
+    t.setText(texto).setColor(color).setAlpha(1).setScale(1.3);
+    this.tweens.add({ targets: t, scale: 1, duration: 220, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: t, alpha: 0, delay: 1100, duration: 300 });
+  }
+
+  quitarCorazon() {
+    const c = this.corazones[this.est.vidas];
+    if (!c) return;
+    this.tweens.add({
+      targets: c, alpha: 0, duration: 110, yoyo: true, repeat: 2,
+      onComplete: () => c.setTexture('corazonGris').setAlpha(1)
+    });
+  }
+
+  parpadear() {
+    if (this.astro.texture.key !== 'astro') return;
+    this.astro.setTexture('astroParpadeo');
+    this.time.delayedCall(140, () => { if (this.astro.texture.key === 'astroParpadeo') this.astro.setTexture('astro'); });
+  }
+
+  // ---------- entrada ----------
+  accion(a, desdeTeclado) {
+    if (this.est.estado !== 'JUGANDO') return;
+    if (desdeTeclado) this.botones[a].presionar();
+    if (a === 'IZQ') this.elegir(1);
+    else if (a === 'DER') this.elegir(2);
+    else this.saltar();
+  }
+
+  elegir(lado) {
+    const e = this.est;
+    if (e.subestado !== 'ELIGIENDO' || this.bloqueado) return;
+    e.seleccion = lado;
+    this.marcador.setPosition(this.xCristal(lado), this.yPos(e.posicion + 1)).setVisible(true);
+    const x = this.xPos(e.posicion) + (lado === 1 ? -6 : 6);
+    this.tweens.killTweensOf([this.astro, this.sombra]);
+    this.astro.setScale(1);
+    this.tweens.add({ targets: [this.astro, this.sombra], x, duration: 120, ease: 'Sine.easeOut' });
+    Sonido.bip();
+  }
+
+  saltar() {
+    const e = this.est;
+    if (e.subestado !== 'ELIGIENDO' || this.bloqueado) return;
+    if (e.seleccion === null) { this.aviso(TEXTOS.avisoElegir, C.amarillo); return; }
+
+    e.subestado = 'SALTANDO';
+    this.bloqueado = true;
+    const destino = e.posicion + 1;
+    const plat = e.puente[destino - 1];
+    const lado = e.seleccion;
+    this.marcador.setVisible(false);
+    this.tweens.killTweensOf([this.astro, this.sombra]);
+    this.astro.setScale(1);
+    Sonido.boing();
+
+    const x0 = this.astro.x, y0 = this.astro.y;
+    const x1 = this.xCristal(lado), y1 = this.yPos(destino);
+    this.astro.setTexture('astroSalto');
+    this.cameras.main.pan(CONST.XC, y1 - 40, 450, 'Sine.easeInOut', true);
+    this.tweens.addCounter({
+      from: 0, to: 1, duration: CONST.SALTO_MS, ease: 'Sine.easeInOut',
+      onUpdate: tw => {
+        const t = tw.getValue(), h = Math.sin(Math.PI * t);
+        const x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
+        this.astro.setPosition(x, y - h * 18).setScale(1 + 0.25 * h);
+        this.sombra.setPosition(x, y + 4).setScale(1 - 0.4 * h);
+      },
+      onComplete: () => {
+        this.astro.setTexture('astro').setScale(1);
+        if (lado === plat.resistente) this.aterrizar(destino);
+        else this.romper(plat, lado);
+      }
+    });
+  }
+
+  aterrizar(destino) {
+    const e = this.est;
+    e.posicion = destino;
+    const vidrio = this.cristales[destino - 1][e.puente[destino - 1].resistente];
+    vidrio.setTintFill(0xffffff);
+    this.time.delayedCall(110, () => vidrio.clearTint());
+    this.tweens.add({ targets: this.astro, scaleY: 0.85, duration: 70, yoyo: true });
+    Sonido.ding();
+    this.aviso(TEXTOS.avisoBien, C.celeste);
+    this.actualizarHud();
+
+    if (destino === e.totalPlataformas) { this.ganar(); return; }
+    e.seleccion = null;
+    e.subestado = 'ELIGIENDO';
+    this.bloqueado = false;
+  }
+
+  romper(plat, lado) {
+    const vidrio = this.cristales[plat.indice - 1][lado];
+    if (!plat.rotos.includes(lado)) {
+      plat.rotos.push(lado);
+      vidrio.setTexture('cristalRoto');
+      Sonido.crack();
+      for (let i = 0; i < 8; i++) {
+        const f = this.add.image(
+          vidrio.x + Phaser.Math.Between(-14, 14), vidrio.y + Phaser.Math.Between(-7, 7), 'fragmento'
+        ).setDepth(6);
+        this.tweens.add({
+          targets: f,
+          x: f.x + Phaser.Math.Between(-46, 46), y: f.y + Phaser.Math.Between(-34, 34),
+          angle: Phaser.Math.Between(-180, 180), alpha: 0,
+          duration: Phaser.Math.Between(700, 1100), ease: 'Cubic.easeOut',
+          onComplete: () => f.destroy()
+        });
+      }
+    }
+    this.sombra.setVisible(false);
+    this.perderVida(lado);
+  }
+
+  perderVida(lado) {
+    const e = this.est;
+    e.subestado = 'CAYENDO';
+    e.vidas -= 1;
+    this.aviso(TEXTOS.avisoRoto, C.coral);
+    this.quitarCorazon();
+    this.astro.setTexture('astroSalto');
+    const dir = lado === 1 ? -1 : 1;
+
+    this.time.delayedCall(140, () => {
+      Sonido.fiuu();
+      this.tweens.add({
+        targets: this.astro,
+        x: this.astro.x + dir * 300, y: this.astro.y - 110,
+        angle: dir * -300, scale: 0.7,
+        duration: 1000, ease: 'Sine.easeIn',
+        onComplete: () => {
+          if (e.vidas <= 0) { this.perder(); return; }
+          this.reaparecer();
+        }
+      });
+    });
+  }
+
+  reaparecer() {
+    const e = this.est;
+    const x = this.xPos(e.posicion), y = this.yPos(e.posicion);
+    this.astro.setAngle(0).setScale(1).setTexture('astro').setPosition(x, y).setAlpha(0);
+    this.sombra.setPosition(x, y + 4).setScale(1).setVisible(true);
+    this.cameras.main.pan(CONST.XC, y - 40, 400, 'Sine.easeInOut', true);
+    Sonido.pop();
+    this.tweens.add({
+      targets: this.astro, alpha: 1, duration: 100, yoyo: true, repeat: 2,
+      onComplete: () => {
+        this.astro.setAlpha(1);
+        e.seleccion = null;
+        e.subestado = 'ELIGIENDO';
+        this.bloqueado = false;
+      }
+    });
+  }
+
+  ganar() {
+    const e = this.est;
+    e.estado = 'VICTORIA';
+    this.bloqueado = true;
+    this.marcador.setVisible(false);
+    this.time.delayedCall(380, () => {
+      const x0 = this.astro.x, y0 = this.astro.y, x1 = CONST.XC, y1 = this.llegadaY;
+      this.cameras.main.pan(CONST.XC, y1 - 40, 600, 'Sine.easeInOut', true);
+      this.tweens.addCounter({
+        from: 0, to: 1, duration: 700,
+        onUpdate: tw => {
+          const t = tw.getValue();
+          const x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
+          this.astro.setPosition(x, y - Math.abs(Math.sin(Math.PI * t * 2)) * 6);
+          this.sombra.setPosition(x, y + 4);
+        },
+        onComplete: () => {
+          this.astro.setTexture('astroSalto');
+          Sonido.fanfarria();
+          this.scene.launch('Victoria');
+        }
+      });
+    });
+  }
+
+  perder() {
+    this.est.estado = 'DERROTA';
+    this.time.delayedCall(200, () => {
+      Sonido.wawa();
+      this.scene.launch('Derrota');
+    });
+  }
+}
+
+class EscenaVictoria extends Phaser.Scene {
+  constructor() { super('Victoria'); }
+  create() {
+    this.saliendo = false;
+    const calma = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const fondo = this.add.rectangle(0, 0, ANCHO, ALTO, hex(C.noche), 0.65).setOrigin(0).setAlpha(0).setInteractive();
+    this.tweens.add({ targets: fondo, alpha: 1, duration: 300 });
+
+    this.add.particles(0, -6, 'confeti', {
+      x: { min: 0, max: ANCHO },
+      speedY: { min: 40, max: 100 }, speedX: { min: -25, max: 25 },
+      gravityY: 15, lifespan: 6000, frequency: calma ? 120 : 25, quantity: 2,
+      rotate: { min: 0, max: 360 }, scale: { min: 1, max: 2 },
+      tint: [hex(C.amarillo), hex(C.celeste), hex(C.coral), hex(C.blanco), 0x7CE38B]
+    });
+
+    if (!calma) {
+      this.estallido();
+      this.time.addEvent({ delay: 700, loop: true, callback: () => this.estallido() });
+    }
+
+    const t1 = txt(this, 240, 62, TEXTOS.felicidades1, 24, C.amarillo, false)
+      .setOrigin(0.5).setStroke(C.negro, 6).setShadow(0, 4, C.azul, 0, true, true).setScale(0);
+    const t2 = txt(this, 240, 96, TEXTOS.felicidades2, 16, C.blanco).setOrigin(0.5).setStroke(C.negro, 4).setScale(0);
+    this.tweens.add({ targets: t1, scale: 1, duration: 500, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: t2, scale: 1, duration: 500, delay: 250, ease: 'Back.easeOut' });
+    if (!calma) this.tweens.add({ targets: t1, angle: { from: -3, to: 3 }, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: 500 });
+
+    const astro = this.add.image(240, 172, 'astroSalto').setScale(2).setOrigin(0.5, 0.9);
+    this.tweens.add({ targets: astro, y: 162, duration: 500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+
+    crearBoton(this, 240, 218, {
+      w: 200, h: 36, estilo: 'amarillo', texto: TEXTOS.reiniciar, tam: 16,
+      alPresionar: () => this.reiniciar()
+    });
+    prepararTeclas(this, { ENTER: () => this.reiniciar(), SPACE: () => this.reiniciar() });
+  }
+  estallido() {
+    const cx = Phaser.Math.Between(70, 410), cy = Phaser.Math.Between(30, 140);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const s = this.add.image(cx, cy, 'estrella').setScale(0.5);
+      this.tweens.add({
+        targets: s, x: cx + Math.cos(a) * 46, y: cy + Math.sin(a) * 46,
+        scale: 2, alpha: 0, angle: 90, duration: 800, ease: 'Cubic.easeOut',
+        onComplete: () => s.destroy()
+      });
+    }
+  }
+  reiniciar() {
+    if (this.saliendo) return;
+    this.saliendo = true;
+    Sonido.clic();
+    this.scene.start('Juego');
+  }
+}
+
+class EscenaDerrota extends Phaser.Scene {
+  constructor() { super('Derrota'); }
+  create() {
+    this.saliendo = false;
+    const fondo = this.add.rectangle(0, 0, ANCHO, ALTO, hex(C.noche), 0.6).setOrigin(0).setAlpha(0).setInteractive();
+    this.tweens.add({ targets: fondo, alpha: 1, duration: 300 });
+
+    const panel = this.add.container(240, -100);
+    const g = this.add.graphics();
+    const w = 336, h = 128;
+    g.fillStyle(hex(C.negro)); g.fillRect(-w / 2 + 2, -h / 2, w - 4, h); g.fillRect(-w / 2, -h / 2 + 2, w, h - 4);
+    g.fillStyle(hex(C.celeste)); g.fillRect(-w / 2 + 2, -h / 2 + 2, w - 4, h - 4);
+    g.fillStyle(hex(C.noche)); g.fillRect(-w / 2 + 4, -h / 2 + 4, w - 8, h - 8);
+    g.fillStyle(hex(C.azul)); g.fillRect(-w / 2 + 4, -h / 2 + 4, w - 8, 4);
+
+    const t = txt(this, 0, -24, TEXTOS.perdiste, 24, C.coral, false)
+      .setOrigin(0.5).setStroke(C.negro, 6).setShadow(0, 3, C.azul, 0, true, true);
+    const b = crearBoton(this, 0, 30, {
+      w: 304, h: 36, estilo: 'amarillo', texto: TEXTOS.volver, tam: 16,
+      alPresionar: () => this.reintentar()
+    });
+    panel.add([g, t, ...b.partes]);
+    this.tweens.add({ targets: panel, y: 128, duration: 900, ease: 'Bounce.easeOut' });
+
+    prepararTeclas(this, { ENTER: () => this.reintentar(), SPACE: () => this.reintentar() });
+  }
+  reintentar() {
+    if (this.saliendo) return;
+    this.saliendo = true;
+    Sonido.clic();
+    this.scene.start('Juego');
+  }
+}
+
+// ============================================================
+// ARRANQUE (espera la fuente pixel para que los textos salgan bien)
+// ============================================================
+function arrancar() {
+  if (typeof Phaser === 'undefined') {
+    const el = document.getElementById('cargando');
+    if (el) el.textContent = TEXTOS.error;
+    return;
+  }
+  new Phaser.Game({
+    type: Phaser.AUTO,
+    parent: 'juego',
+    width: ANCHO,
+    height: ALTO,
+    backgroundColor: C.noche,
+    pixelArt: true,
+    roundPixels: true,
+    audio: { noAudio: true },
+    input: { activePointers: 3 },
+    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+    scene: [EscenaCarga, EscenaMenu, EscenaJuego, EscenaVictoria, EscenaDerrota]
+  });
+}
+
+let arrancado = false;
+const unaVez = () => { if (!arrancado) { arrancado = true; arrancar(); } };
+if (document.fonts && document.fonts.load) {
+  Promise.race([
+    Promise.all([
+      document.fonts.load('8px "Press Start 2P"', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'),
+      document.fonts.load('16px "Press Start 2P"', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'),
+      document.fonts.load('24px "Press Start 2P"', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+    ]),
+    new Promise(r => setTimeout(r, 2500))
+  ]).catch(() => {}).finally(unaVez);
+} else {
+  unaVez();
+}
+})();
+</script>
+</body>
+</html>

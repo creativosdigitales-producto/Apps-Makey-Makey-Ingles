@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>WHAT USES ELECTRICITY?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+:root{
+  --letterbox:#14121c; --ink:#1a1c2c; --paper:#f4f4f4; --sun:#ffec27; --sky:#29adff;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --letterbox:#0c0b12; } }
+:root[data-theme="dark"]{ --letterbox:#0c0b12; }
+html{ height:100%; scroll-padding-top:env(safe-area-inset-top,0px); }
+*,*::before,*::after{ box-sizing:inherit; }
+html,body{ margin:0; height:100%; overflow:hidden; }
+body{ background:var(--letterbox); font-family:"Press Start 2P","Courier New",monospace; text-transform:uppercase; color:var(--ink); -webkit-tap-highlight-color:transparent; user-select:none; }
+canvas{ image-rendering:pixelated; image-rendering:crisp-edges; display:block; }
+#wrap{ position:relative; width:100%; height:100%; overflow:hidden; }
+#stage{ position:absolute; left:50%; top:50%; width:1600px; height:900px; transform-origin:center center; overflow:hidden; background:#5b6ee1; }
+
+/* ===== SALA ===== */
+#wall{ position:absolute; inset:0 0 280px 0;
+  background:
+    repeating-linear-gradient(90deg,#8fb8de 0 40px,#84aed6 40px 80px);
+}
+#wall::after{ content:""; position:absolute; left:0; right:0; bottom:0; height:28px; background:#6b3a1e; box-shadow:0 -6px 0 #ab5236; }
+#floor{ position:absolute; left:0; right:0; bottom:0; height:280px;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 54px, #8a4a24 54px 60px),
+    repeating-linear-gradient(90deg,#d08b4f 0 200px,#c27d43 200px 400px);
+}
+#window{ position:absolute; left:1080px; top:110px; width:240px; height:180px; background:#29adff; border:12px solid #f4f4f4; box-shadow:0 0 0 6px #1a1c2c, 8px 8px 0 6px rgba(26,28,44,.25); overflow:hidden; }
+#window::before{ content:""; position:absolute; left:50%; top:0; bottom:0; width:10px; margin-left:-5px; background:#f4f4f4; }
+#window::after{ content:""; position:absolute; left:0; right:0; top:50%; height:10px; margin-top:-5px; background:#f4f4f4; }
+.cloud{ position:absolute; height:18px; background:#fff; box-shadow:12px -12px 0 #fff, 24px 0 0 #fff; }
+#rug{ position:absolute; left:470px; right:150px; bottom:24px; height:70px; background:#b13e53; box-shadow:0 0 0 8px #ef7d57, 0 0 0 14px #b13e53; opacity:.85; }
+#shelf{ position:absolute; left:390px; width:1180px; top:400px; height:20px; background:#ab5236; box-shadow:0 6px 0 #6b3a1e, 0 12px 0 rgba(26,28,44,.25); }
+.bracket{ position:absolute; top:426px; width:16px; height:40px; background:#6b3a1e; }
+
+#objects{ position:absolute; inset:0; }
+.obj{ position:absolute; cursor:pointer; outline:none; }
+.obj .spr{ position:relative; z-index:2; }
+.obj:hover .spr,.obj:focus-visible .spr{ transform:translateY(-6px); }
+.obj:focus-visible .spr{ filter:drop-shadow(0 0 0 #fff) drop-shadow(4px 0 0 #fff) drop-shadow(-4px 0 0 #fff) drop-shadow(0 4px 0 #fff) drop-shadow(0 -4px 0 #fff); }
+.obj .shadow{ position:absolute; left:8%; right:8%; bottom:-10px; height:14px; background:rgba(26,28,44,.28); z-index:1; }
+.obj .tag{ position:absolute; left:50%; bottom:calc(100% + 14px); transform:translateX(-50%); white-space:nowrap; font-size:14px; background:#1a1c2c; color:#fff; padding:8px 10px; display:none; z-index:20; box-shadow:4px 4px 0 rgba(0,0,0,.3); pointer-events:none; }
+.obj:hover .tag,.obj:focus-visible .tag{ display:block; }
+.obj.elec .spr{ animation:glow 1.4s steps(4) infinite; }
+@keyframes glow{ 0%,100%{ filter:drop-shadow(0 0 0 rgba(255,236,39,0)); } 50%{ filter:drop-shadow(0 0 10px rgba(255,236,39,.85)); } }
+.plug{ position:absolute; bottom:0; z-index:3; pointer-events:none; }
+.bolt{ position:absolute; z-index:4; pointer-events:none; animation:zap 1s steps(2) infinite; }
+@keyframes zap{ 0%{ transform:translateY(0); opacity:1; } 50%{ transform:translateY(-6px); opacity:.35; } }
+.obj.ok, .obj.bad{ cursor:default; }
+.obj.ok .spr{ animation:none; filter:drop-shadow(0 0 0 #fff) drop-shadow(0 0 12px rgba(0,228,54,.9)); }
+.obj.ok .bolt{ animation:none; }
+.obj.bad .spr{ filter:grayscale(1) brightness(.85); animation:shake .4s steps(4) 1; }
+@keyframes shake{ 0%,100%{ transform:translateX(0);} 25%{ transform:translateX(-10px);} 75%{ transform:translateX(10px);} }
+.badge{ position:absolute; left:50%; top:-10px; transform:translate(-50%,-100%); z-index:6; animation:pop .35s steps(3) 1; }
+@keyframes pop{ 0%{ transform:translate(-50%,-60%) scale(.3);} 100%{ transform:translate(-50%,-100%) scale(1);} }
+
+/* ===== PERSONAJE Y GLOBO ===== */
+#hero{ position:absolute; left:70px; bottom:40px; z-index:8; animation:bob 1.2s steps(2) infinite; }
+@keyframes bob{ 50%{ transform:translateY(-6px); } }
+#hero.jump{ animation:jump .5s steps(4) infinite; }
+@keyframes jump{ 50%{ transform:translateY(-36px); } }
+.bubble{ position:absolute; background:#fff; color:#1a1c2c; font-size:18px; line-height:1.7; padding:20px 22px;
+  box-shadow:0 -6px 0 #fff,0 6px 0 #fff,-6px 0 0 #fff,6px 0 0 #fff, 0 -12px 0 #1a1c2c,0 12px 0 #1a1c2c,-12px 0 0 #1a1c2c,12px 0 0 #1a1c2c, -6px -6px 0 #1a1c2c, 6px -6px 0 #1a1c2c, -6px 6px 0 #1a1c2c, 6px 6px 0 #1a1c2c, 12px 18px 0 rgba(26,28,44,.25); }
+.bubble .tail{ position:absolute; width:18px; height:18px; background:#fff; }
+#gBubble{ left:40px; bottom:300px; width:330px; min-height:120px; z-index:9; }
+#gBubble .tail{ left:110px; bottom:-24px; box-shadow:0 6px 0 #1a1c2c, -6px 0 0 #1a1c2c, 6px 0 0 #1a1c2c, 0 12px 0 #fff, 0 18px 0 #1a1c2c, -6px 12px 0 #1a1c2c, 6px 12px 0 #1a1c2c; }
+#gBubble.good{ color:#008751; } #gBubble.bad{ color:#c4003d; }
+
+/* ===== HUD ===== */
+#hud{ position:absolute; left:0; right:0; top:0; height:84px; background:#1a1c2c; color:#fff; display:flex; align-items:center; justify-content:space-between; padding:0 28px; z-index:10; box-shadow:0 6px 0 #29366f; }
+#hud h1{ font-size:22px; margin:0; color:#ffec27; text-shadow:4px 4px 0 #b13e53; font-weight:normal; }
+.hud-mid{ display:flex; align-items:center; gap:14px; font-size:22px; }
+.hud-right{ display:flex; align-items:center; gap:22px; }
+#hearts{ display:flex; gap:10px; }
+.btn-mini{ font-family:inherit; text-transform:uppercase; font-size:12px; background:#333c57; color:#fff; border:none; padding:12px 14px; cursor:pointer; box-shadow:inset -4px -4px 0 #1a1c2c, inset 4px 4px 0 #566c86; }
+.btn-mini:focus-visible{ outline:4px solid #ffec27; }
+
+/* ===== PANTALLAS ===== */
+.screen{ position:absolute; inset:0; z-index:30; display:none; align-items:center; justify-content:center; background:rgba(26,28,44,.72); }
+.screen.show{ display:flex; }
+.btn{ font-family:inherit; text-transform:uppercase; font-size:24px; color:#1a1c2c; background:#ffec27; border:none; padding:22px 30px; cursor:pointer;
+  box-shadow:inset -6px -6px 0 #ffa300, inset 6px 6px 0 #fff6a8, 0 0 0 6px #1a1c2c, 0 12px 0 6px #1a1c2c; }
+.btn:hover{ background:#fff17a; }
+.btn:active{ transform:translateY(6px); box-shadow:inset -6px -6px 0 #ffa300, inset 6px 6px 0 #fff6a8, 0 0 0 6px #1a1c2c, 0 6px 0 6px #1a1c2c; }
+.btn:focus-visible{ outline:6px solid #29adff; outline-offset:10px; }
+.btn.red{ background:#ff6b7a; box-shadow:inset -6px -6px 0 #c4003d, inset 6px 6px 0 #ffb3bb, 0 0 0 6px #1a1c2c, 0 12px 0 6px #1a1c2c; color:#fff; text-shadow:3px 3px 0 #1a1c2c; }
+
+#intro .title{ position:absolute; top:70px; left:0; right:0; text-align:center; font-size:52px; color:#ffec27; text-shadow:6px 6px 0 #b13e53, 12px 12px 0 #1a1c2c; letter-spacing:2px; }
+#intro .sub{ position:absolute; top:160px; left:0; right:0; text-align:center; font-size:16px; color:#a0e8ff; }
+#introHero{ position:absolute; left:250px; bottom:150px; animation:bob 1.2s steps(2) infinite; }
+#iBubble{ left:640px; top:290px; width:760px; min-height:250px; font-size:24px; line-height:1.8; padding:34px 38px; }
+#iBubble .tail{ left:-30px; top:120px; box-shadow:-6px 0 0 #fff, -12px 0 0 #fff,0 -6px 0 #1a1c2c,0 6px 0 #1a1c2c, -6px -6px 0 #1a1c2c, -6px 6px 0 #1a1c2c, -12px -6px 0 #1a1c2c,-12px 6px 0 #1a1c2c,-18px 0 0 #1a1c2c; }
+#iText{ min-height:130px; }
+.hintrow{ display:flex; align-items:center; gap:18px; margin-top:14px; }
+#iNav{ position:absolute; left:640px; top:660px; display:flex; gap:30px; align-items:center; }
+.dots{ display:flex; gap:12px; margin-left:20px; }
+.dots i{ width:16px; height:16px; background:#566c86; display:block; }
+.dots i.on{ background:#ffec27; }
+
+.panel{ position:relative; background:#f4f4f4; width:880px; padding:48px 50px 60px; text-align:center;
+  box-shadow:0 0 0 8px #1a1c2c, inset -8px -8px 0 #c2c3c7, inset 8px 8px 0 #fff, 16px 16px 0 8px rgba(0,0,0,.35); }
+.panel h2{ margin:0 0 26px; font-size:46px; font-weight:normal; }
+.panel p{ font-size:20px; line-height:1.8; margin:0 0 30px; }
+#win h2{ color:#008751; text-shadow:5px 5px 0 #a8f0b8; }
+#lose h2{ color:#c4003d; text-shadow:5px 5px 0 #ffc2cb; }
+.row{ display:flex; justify-content:center; align-items:flex-end; gap:24px; margin-bottom:26px; }
+#confetti{ position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+#confetti i{ position:absolute; top:-30px; width:16px; height:16px; animation:fall linear forwards; }
+@keyframes fall{ to{ transform:translateY(980px) rotate(720deg); } }
+
+@media (prefers-reduced-motion: reduce){
+  *{ animation-duration:.001s !important; animation-iteration-count:1 !important; }
+}
+</style>
+</head>
+<body>
+<div id="wrap">
+<div id="stage">
+  <div id="wall"></div>
+  <div id="window"><div class="cloud" style="left:30px;top:50px;width:40px"></div><div class="cloud" style="left:140px;top:110px;width:30px"></div></div>
+  <div id="floor"></div>
+  <div id="rug"></div>
+  <div id="shelf"></div>
+  <div class="bracket" style="left:470px"></div><div class="bracket" style="left:970px"></div><div class="bracket" style="left:1480px"></div>
+  <div id="objects"></div>
+
+  <div id="hero"></div>
+  <div id="gBubble" class="bubble"><div class="tail"></div><div id="gText"></div></div>
+
+  <div id="hud">
+    <h1>WHAT USES ELECTRICITY?</h1>
+    <div class="hud-mid"><span id="hudBolt"></span><span id="count">0 / 0</span></div>
+    <div class="hud-right"><div id="hearts" aria-label="LIVES"></div><button class="btn-mini" id="sndBtn">SOUND: ON</button></div>
+  </div>
+
+  <div id="intro" class="screen show">
+    <div class="title">WHAT USES ELECTRICITY?</div>
+    <div class="sub">A GAME FOR ENERGY DETECTIVES</div>
+    <div id="introHero"></div>
+    <div id="iBubble" class="bubble"><div class="tail"></div><div id="iText"></div><div id="iHint"></div></div>
+    <div id="iNav"><button class="btn" id="iNext">NEXT</button><div class="dots" id="dots"></div></div>
+  </div>
+
+  <div id="win" class="screen">
+    <div id="confetti"></div>
+    <div class="panel">
+      <h2>CONGRATULATIONS!</h2>
+      <div class="row" id="stars"></div>
+      <p id="winText"></p>
+      <button class="btn" id="againBtn">PLAY AGAIN</button>
+    </div>
+  </div>
+
+  <div id="lose" class="screen">
+    <div class="panel">
+      <h2>YOU LOST</h2>
+      <div class="row" id="loseHearts"></div>
+      <p id="loseText">YOU MADE 3 MISTAKES.<br>NO WORRIES! LOOK CLOSELY: THE ONES THAT USE ELECTRICITY GLOW AND HAVE A LITTLE BOLT.</p>
+      <button class="btn red" id="retryBtn">TRY AGAIN</button>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+/* ---------- PALETA ---------- */
+const P={k:'#1a1c2c',w:'#f4f4f4',g:'#c2c3c7',G:'#8b8b9b',d:'#5f574f',D:'#3a3640',b:'#29adff',B:'#1d6fd1',N:'#1d2b53',
+s:'#ffccaa',S:'#e8a87c',r:'#ff004d',R:'#a3002f',o:'#ffa300',y:'#ffec27',Y:'#fff6a8',n:'#ab5236',m:'#6b3a1e',
+l:'#00e436',L:'#008751',c:'#a0e8ff',p:'#ff77a8',v:'#83769c',t:'#e4bb85',u:'#6fd3ff'};
+
+function mk(w,h,draw,scale){
+  const c=document.createElement('canvas'); c.width=w; c.height=h;
+  const x=c.getContext('2d');
+  const R=(col,a,b,ww,hh)=>{x.fillStyle=P[col]||col; x.fillRect(a,b,ww,hh);};
+  const D=(col,cx,cy,r)=>{x.fillStyle=P[col]||col; for(let j=0;j<h;j++)for(let i=0;i<w;i++){const dx=i+.5-cx,dy=j+.5-cy; if(dx*dx+dy*dy<=r*r)x.fillRect(i,j,1,1);}};
+  draw(R,D);
+  c.style.width=w*scale+'px'; c.style.height=h*scale+'px';
+  return c;
+}
+function fromStr(rows,scale,swap){
+  return mk(rows[0].length,rows.length,(R)=>{rows.forEach((row,j)=>[...row].forEach((ch,i)=>{ if(ch!=='.'){ R(swap&&swap[ch]?swap[ch]:ch,i,j,1,1);} }));},scale);
+}
+
+/* ---------- PERSONAJE ---------- */
+const heroBase=[
+"....kkkkkkkk....",
+"...kwwwwwwwwk...",
+"..kwwwwwwwwwwk..",
+".kwwwwwwwwwwwgk.",
+".kwwwwwwwwwwwgk.",
+"kbbkkkkkkkkkkkbk",
+"kbbksssssssssbk".padEnd(16,'k'),
+"kbbksskssskssbk".padEnd(16,'k'),
+"kbbksskssskssbk".padEnd(16,'k'),
+"MOUTH",
+"kbbkkkkkkkkkkkbk",
+".kwwwwwwwwwwwgk.",
+"..kkwwwwwwwwkk..",
+".kwwwbwwwwbwwwk.",
+"kwkwwbwwwwbwwkwk",
+"kwkwwwwccwwwwkwk",
+"kskwwwwwwwwwwksk",
+".kkbbbbbbbbbbkk.",
+"..kgggk..kgggk..",
+"..kgggk..kgggk..",
+"..kddddk.kddddk.",
+"..kkkkkk.kkkkkk."];
+// filas de la cara: borde k, azul, k, 9 de piel, k, azul, k
+function face(inner){ return "kbbk"+inner+"kbk"; }
+heroBase[6]=face("sssssssss"); heroBase[7]=face("sskssskss"); heroBase[8]=face("sskssskss");
+const heroIdle=heroBase.slice(); heroIdle[9]=face("psssksssp");
+const heroTalk=heroBase.slice(); heroTalk[9]=face("psskkkssp");
+const heroHappy=heroBase.slice(); heroHappy[7]=face("skksssKKs".replace(/K/g,'k')); heroHappy[8]=face("sssssssss"); heroHappy[9]=face("pskkkkksp");
+
+function Hero(el,scale){
+  this.frames=[fromStr(heroIdle,scale),fromStr(heroTalk,scale),fromStr(heroHappy,scale)];
+  this.el=el; this.cur=null; this.set(0);
+}
+Hero.prototype.set=function(i){ if(this.cur===i)return; this.cur=i; this.el.innerHTML=''; this.el.appendChild(this.frames[i]); };
+
+/* ---------- SPRITES PEQUEÑOS ---------- */
+const BOLT=["...kkkk","..kyyyk","..kyyk.",".kyyk..",".kyyykk","kyyyyyk","kkkyyk.","..kyk..","..kk...","..k...."];
+const HEART=[".kk.kk.","kwrkrrk","krrrrrk","krrrrrk",".krrrk.","..krk..","...k..."];
+const STAR=[".....k.....","....kyk....","....kyk....","kkkkyyykkkk","kyyyyyyyyyk",".kyyyyyyyk.","..kyyyyyk..","..kyykyyk..",".kyk...kyk.",".kk.....kk."];
+const CHECK=["......kk",".....klk","k...klk.","kk.klk..","klklk...",".klk....","..k....."];
+const XMARK=["kk...kk","krk.krk",".krkrk.","..krk..",".krkrk.","krk.krk","kk...kk"];
+const PLUG=["......kkk.","......kGGk","......kGGkk","kkkkkkkGGk.","......kGGkk","......kkk.."].map(r=>r.padEnd(11,'.'));
+
+/* ---------- OBJETOS ---------- */
+const OBJS=[
+ // ELÉCTRICOS GRANDES
+ {id:'tv',name:'THE TV',elec:1,size:'big',w:24,h:22,why:'IT PLUGS IN TO SHOW IMAGES.',draw:(R)=>{
+   R('k',0,0,24,17);R('D',1,1,22,15);R('k',2,2,16,12);R('u',3,3,14,6);R('l',3,9,14,4);R('L',3,11,14,2);R('y',13,4,2,2);R('w',5,4,4,1);R('w',4,5,6,1);
+   R('G',19,3,3,11);R('k',20,4,1,1);R('k',20,7,1,1);R('k',19,10,3,1);R('k',19,12,3,1);R('r',20,5,1,1);
+   R('k',9,17,6,2);R('k',5,19,14,3);R('d',6,20,12,1);}},
+ {id:'fridge',name:'THE REFRIGERATOR',elec:1,size:'big',w:16,h:30,why:'IT NEEDS ELECTRICITY TO COOL.',draw:(R)=>{
+   R('k',0,0,16,30);R('w',1,1,14,28);R('g',13,1,2,28);R('k',1,10,14,1);R('G',11,3,1,5);R('G',11,13,1,8);
+   R('r',3,4,2,2);R('y',6,14,2,2);R('b',3,16,2,3);R('l',3,2,1,1);R('d',2,28,12,1);}},
+ {id:'washer',name:'THE WASHING MACHINE',elec:1,size:'big',w:20,h:22,why:'ITS MOTOR SPINS WITH ELECTRICITY.',draw:(R,D)=>{
+   R('k',0,0,20,22);R('w',1,1,18,20);R('g',1,1,18,4);R('k',1,5,18,1);R('r',2,2,2,2);R('l',5,2,2,2);R('N',10,2,7,2);R('l',11,2,3,1);
+   D('k',10,13,7);D('G',10,13,6);D('k',10,13,4.6);D('b',10,13,3.8);R('B',7,14,7,3);R('c',8,10,2,1);R('g',18,1,1,20);}},
+ {id:'lamp',name:'THE FLOOR LAMP',elec:1,size:'big',w:16,h:32,why:'IT TURNS ON WITH ELECTRICITY.',draw:(R)=>{
+   for(let i=0;i<9;i++){const h=3+Math.floor(i/2);R('k',8-h-1,i,2*h+2,1);R(i<2?'Y':(i<6?'y':'o'),8-h,i,2*h,1);}
+   R('k',0,9,16,1);R('Y',6,10,4,2);R('d',7,12,2,17);R('k',3,29,10,3);R('G',4,30,8,1);}},
+ {id:'fan',name:'THE FAN',elec:1,size:'big',w:16,h:28,why:'ITS MOTOR SPINS THE BLADES.',draw:(R,D)=>{
+   D('k',8,7,7.6);D('g',8,7,6.6);R('b',7,1,2,6);R('b',9,6,6,2);R('b',7,8,2,6);R('b',1,6,6,2);R('B',8,2,1,4);R('B',3,7,3,1);R('k',7,6,2,2);
+   R('d',7,14,2,2);R('G',7,16,2,9);R('k',3,25,10,3);R('d',4,26,8,1);R('r',11,25,1,1);}},
+ {id:'pc',name:'THE COMPUTER',elec:1,size:'big',w:24,h:28,why:'IT WORKS PLUGGED INTO THE OUTLET.',draw:(R)=>{
+   R('k',4,0,16,12);R('D',5,1,14,10);R('N',6,2,12,8);R('l',7,3,5,1);R('p',13,3,3,1);R('y',8,5,6,1);R('b',8,7,4,1);R('w',13,7,2,1);
+   R('k',11,12,2,2);R('k',5,14,12,2);R('g',6,14,10,1);R('k',18,14,2,2);
+   R('n',0,16,24,1);R('m',0,17,24,1);R('m',1,18,2,10);R('m',21,18,2,10);R('k',14,19,5,9);R('G',15,20,3,7);R('l',16,21,1,1);}},
+ // ELÉCTRICOS CHICOS
+ {id:'micro',name:'THE MICROWAVE',elec:1,size:'small',w:20,h:12,why:'IT HEATS FOOD WITH ELECTRICITY.',draw:(R)=>{
+   R('k',0,0,20,12);R('w',1,1,18,10);R('k',2,2,11,8);R('o',3,3,9,6);R('y',4,4,3,1);R('G',4,7,7,1);
+   R('N',14,2,4,2);R('l',15,2,2,1);R('G',14,5,1,1);R('G',16,5,1,1);R('G',14,7,1,1);R('G',16,7,1,1);R('g',18,1,1,10);}},
+ {id:'toaster',name:'THE TOASTER',elec:1,size:'small',w:15,h:12,why:'IT HEATS UP TO TOAST BREAD.',draw:(R)=>{
+   R('m',3,0,3,1);R('t',3,1,3,3);R('m',8,0,3,1);R('t',8,1,3,3);
+   R('k',0,3,14,9);R('G',1,4,12,7);R('g',1,4,12,2);R('k',3,3,3,1);R('k',8,3,3,1);R('k',14,6,1,3);R('r',13,6,1,2);R('r',2,9,1,1);}},
+ {id:'radio',name:'THE RADIO',elec:1,size:'small',w:16,h:14,why:'IT USES ELECTRICITY TO MAKE SOUND.',draw:(R)=>{
+   R('G',12,0,1,4);R('k',11,0,1,1);R('k',0,4,16,10);R('r',1,5,14,8);R('R',1,12,14,1);
+   R('k',2,6,6,6);R('D',3,7,4,4);R('G',4,8,2,2);R('Y',9,6,5,2);R('k',11,6,1,2);R('k',9,10,2,2);R('k',12,10,2,2);}},
+ {id:'blender',name:'THE BLENDER',elec:1,size:'small',w:10,h:18,why:'ITS MOTOR TURNS THE BLADES.',draw:(R)=>{
+   R('k',1,0,8,1);R('c',1,1,8,9);R('k',0,1,1,9);R('k',9,1,1,9);R('p',2,4,6,6);R('w',2,2,1,7);R('G',3,9,4,1);
+   R('k',0,10,10,8);R('G',1,11,8,6);R('l',2,13,2,2);R('r',6,13,2,2);}},
+ {id:'kettle',name:'THE ELECTRIC KETTLE',elec:1,size:'small',w:14,h:14,why:'IT HEATS WATER WITH ELECTRICITY.',draw:(R)=>{
+   R('k',4,0,5,2);R('G',5,1,3,1);R('k',2,2,9,12);R('w',3,3,7,10);R('g',8,3,2,10);R('k',0,4,2,2);R('w',1,5,1,1);
+   R('k',11,3,3,1);R('k',13,3,1,8);R('k',11,10,3,1);R('b',4,6,2,5);R('l',7,11,1,1);R('D',2,13,9,1);}},
+ {id:'desklamp',name:'THE DESK LAMP',elec:1,size:'small',w:12,h:14,why:'IT LIGHTS UP WITH ELECTRICITY.',draw:(R)=>{
+   R('k',3,0,6,1);R('b',2,1,8,2);R('b',1,3,10,2);R('B',8,1,2,4);R('k',0,5,12,1);R('Y',4,6,4,1);R('k',5,7,2,5);R('k',2,12,8,2);R('G',3,12,6,1);}},
+ // NO ELÉCTRICOS GRANDES
+ {id:'plant',name:'THE PLANT',elec:0,size:'big',w:14,h:26,why:'IT GROWS WITH WATER AND SUNLIGHT.',draw:(R,D)=>{
+   D('L',7,9,6);D('l',4.5,7,3.6);D('l',9.5,8,3.6);D('L',7,3.5,3);D('l',7,4,2);R('L',6,13,2,4);
+   R('k',1,16,12,2);R('o',2,16,10,1);R('k',2,18,10,8);R('n',3,18,8,7);R('m',3,18,8,1);}},
+ {id:'guitar',name:'THE GUITAR',elec:0,size:'big',w:12,h:30,why:'IT MAKES SOUND WHEN YOU PLAY ITS STRINGS.',draw:(R,D)=>{
+   R('k',4,0,4,3);R('G',3,1,1,1);R('G',8,1,1,1);R('m',5,3,2,11);
+   D('k',6,18,5);D('k',6,24.5,6);D('o',6,18,4);D('o',6,24.5,5);D('k',6,19,1.6);R('m',4,25,4,1);R('g',6,3,1,22);}},
+ {id:'broom',name:'THE BROOM',elec:0,size:'big',w:10,h:30,why:'IT WORKS WITH THE STRENGTH OF YOUR ARMS.',draw:(R)=>{
+   R('n',4,0,2,20);R('m',5,0,1,20);R('r',1,20,8,2);R('t',1,22,8,2);R('t',0,24,10,6);R('o',2,22,1,8);R('o',5,22,1,8);R('o',8,24,1,6);}},
+ {id:'chair',name:'THE CHAIR',elec:0,size:'big',w:14,h:24,why:'IT IS JUST FOR SITTING.',draw:(R)=>{
+   R('m',1,0,2,12);R('m',11,0,2,12);R('n',1,1,12,2);R('n',1,5,12,2);R('n',0,12,14,2);R('m',0,14,14,1);R('m',1,15,2,9);R('m',11,15,2,9);}},
+ {id:'books',name:'THE BOOKSHELF',elec:0,size:'big',w:18,h:26,why:'IT HOLDS BOOKS, IT DOESN\'T PLUG IN.',draw:(R)=>{
+   R('m',0,0,18,26);R('n',1,1,16,24);R('m',1,8,16,1);R('m',1,16,16,1);
+   R('r',2,2,2,6);R('b',4,3,2,5);R('l',6,2,2,6);R('y',8,4,2,4);R('p',11,2,2,6);R('v',13,3,2,5);
+   R('o',2,10,3,6);R('N',5,11,2,5);R('r',8,10,2,6);R('L',12,12,4,4);
+   R('b',2,18,2,7);R('y',4,19,2,6);R('w',6,18,2,7);R('g',9,20,6,5);}},
+ // NO ELÉCTRICOS CHICOS
+ {id:'stack',name:'THE BOOKS',pl:1,elec:0,size:'small',w:14,h:10,why:'THEY ARE READ WITHOUT A PLUG.',draw:(R)=>{
+   R('k',0,7,14,3);R('r',1,7,12,2);R('w',13,8,1,1);R('k',1,4,12,3);R('b',2,4,10,2);R('w',12,5,1,1);R('k',2,1,10,3);R('y',3,1,8,2);R('w',11,2,1,1);}},
+ {id:'hourglass',name:'THE HOURGLASS',elec:0,size:'small',w:10,h:14,why:'IT MEASURES TIME WITH SAND.',draw:(R)=>{
+   R('n',0,0,10,2);R('n',0,12,10,2);R('m',1,2,1,10);R('m',8,2,1,10);R('c',2,2,6,3);R('c',3,5,4,2);R('c',4,7,2,1);R('c',3,8,4,2);R('c',2,10,6,2);
+   R('t',3,3,4,2);R('t',4,6,2,1);R('t',4,7,1,3);R('t',2,10,6,2);R('t',3,9,4,1);}},
+ {id:'candle',name:'THE CANDLE',elec:0,size:'small',w:6,h:14,why:'IT GIVES LIGHT WITH FIRE, NOT ELECTRICITY.',draw:(R)=>{
+   R('o',2,0,2,3);R('y',2,1,1,2);R('k',2,3,1,1);R('w',1,4,4,8);R('g',4,4,1,8);R('G',0,12,6,2);}},
+ {id:'ball',name:'THE BALL',elec:0,size:'small',w:12,h:12,why:'IT IS PLAYED WITH YOUR FEET.',draw:(R,D)=>{
+   D('k',6,6,6);D('w',6,6,5);R('k',5,5,2,2);R('k',2,3,1,2);R('k',9,3,1,2);R('k',3,9,2,1);R('k',8,9,1,1);R('g',8,6,2,2);}},
+ {id:'teddy',name:'THE TEDDY BEAR',elec:0,size:'small',w:12,h:14,why:'IT IS A STUFFED ANIMAL TO HUG.',draw:(R,D)=>{
+   D('n',2.5,2.5,2);D('n',9.5,2.5,2);D('n',6,10.5,3.5);D('n',6,5.2,4);R('t',4,6,4,2);R('k',4,4,1,1);R('k',7,4,1,1);R('k',5,6,2,1);R('t',5,10,2,3);R('m',1,10,2,2);R('m',9,10,2,2);}},
+ {id:'cup',name:'THE CUP',elec:0,size:'small',w:9,h:12,why:'IT IS USED TO DRINK BEVERAGES.',draw:(R)=>{
+   R('g',2,0,1,2);R('g',4,1,1,2);R('k',0,4,7,8);R('r',1,5,5,6);R('w',1,5,1,5);R('R',1,10,5,1);R('k',6,6,3,1);R('k',8,6,1,4);R('k',6,9,3,1);}},
+ {id:'cactus',name:'THE CACTUS',elec:0,size:'small',w:10,h:14,why:'IT IS A PLANT, IT DOESN\'T PLUG IN.',draw:(R)=>{
+   R('p',4,0,2,1);R('l',4,1,2,8);R('L',5,1,1,8);R('l',1,3,1,4);R('l',1,6,3,1);R('l',8,2,1,4);R('l',6,5,3,1);R('n',1,9,8,1);R('o',2,10,6,4);}}
+];
+
+/* ---------- SONIDO ---------- */
+let AC=null, soundOn=true;
+function beep(f,t,d,type='square',vol=.06){ if(!soundOn)return; try{ AC=AC||new (window.AudioContext||window.webkitAudioContext)(); const o=AC.createOscillator(),g=AC.createGain(); o.type=type;o.frequency.value=f; g.gain.value=vol; o.connect(g);g.connect(AC.destination); const s=AC.currentTime+t; o.start(s); g.gain.setValueAtTime(vol,s); g.gain.exponentialRampToValueAtTime(.0001,s+d); o.stop(s+d+.02);}catch(e){} }
+const sfx={
+  ok:()=>{beep(660,0,.08);beep(880,.08,.08);beep(1320,.16,.14);},
+  bad:()=>{beep(180,0,.18,'sawtooth',.05);beep(130,.16,.25,'sawtooth',.05);},
+  win:()=>{[523,659,784,1047,784,1047].forEach((f,i)=>beep(f,i*.13,.16));},
+  lose:()=>{[392,330,262,196].forEach((f,i)=>beep(f,i*.2,.24,'triangle',.08));},
+  blip:()=>beep(990,0,.03,'square',.025)
+};
+
+/* ---------- ESCALA 16:9 ---------- */
+const stage=document.getElementById('stage'), wrap=document.getElementById('wrap');
+function fit(){ const s=Math.min(wrap.clientWidth/1600, wrap.clientHeight/900); stage.style.transform=`translate(-50%,-50%) scale(${s})`; }
+addEventListener('resize',fit); fit();
+
+/* ---------- TEXTO TIPO MÁQUINA ---------- */
+function typer(el,hero){
+  let timer=null;
+  return function(txt,done){
+    clearInterval(timer); el.textContent=''; let i=0;
+    timer=setInterval(()=>{
+      i+=1; el.textContent=txt.slice(0,i);
+      if(hero) hero.set(i%4<2?1:0);
+      if(i%3===0) sfx.blip();
+      if(i>=txt.length){ clearInterval(timer); if(hero) hero.set(0); done&&done(); }
+    },28);
+  };
+}
+
+/* ---------- ESTADO ---------- */
+const hero=new Hero(document.getElementById('hero'),9);
+const introHero=new Hero(document.getElementById('introHero'),16);
+const sayGame=typer(document.getElementById('gText'),hero);
+const sayIntro=typer(document.getElementById('iText'),introHero);
+const gBubble=document.getElementById('gBubble');
+document.getElementById('hudBolt').appendChild(fromStr(BOLT,4));
+
+let total=0, found=0, errors=0, over=false;
+const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;};
+const rnd=(a,b)=>a+Math.floor(Math.random()*(b-a+1));
+
+function drawHearts(){
+  const h=document.getElementById('hearts'); h.innerHTML='';
+  for(let i=0;i<3;i++) h.appendChild(fromStr(HEART,7, i<3-errors?null:{r:'D',w:'D'}));
+}
+function updCount(){ document.getElementById('count').textContent=found+' / '+total; }
+
+function buildRoom(){
+  const box=document.getElementById('objects'); box.innerHTML='';
+  const nE=rnd(6,8);                       // ENTRE 6 Y 8 OBJETOS CON ELECTRICIDAD
+  const fb=rnd(Math.max(2,nE-6),Math.min(6,nE)), sb=nE-fb;
+  const pick=(f,n)=>shuffle(OBJS.filter(f)).slice(0,n);
+  const floor=shuffle([...pick(o=>o.elec&&o.size==='big',fb),...pick(o=>!o.elec&&o.size==='big',7-fb)]);
+  const shelf=shuffle([...pick(o=>o.elec&&o.size==='small',sb),...pick(o=>!o.elec&&o.size==='small',6-sb)]);
+  total=nE; found=0; errors=0; over=false;
+  floor.forEach((o,i)=>place(box,o,420+i*172,860,6,true));
+  shelf.forEach((o,i)=>place(box,o,480+i*192,400,5,false));
+  drawHearts(); updCount();
+}
+
+function place(box,o,cx,baseY,scale,onFloor){
+  const el=document.createElement('div');
+  el.className='obj'+(o.elec?' elec':''); el.tabIndex=0;
+  el.setAttribute('role','button'); el.setAttribute('aria-label',o.name);
+  const W=o.w*scale, H=o.h*scale;
+  el.style.left=(cx-W/2)+'px'; el.style.top=(baseY-H)+'px'; el.style.width=W+'px'; el.style.height=H+'px';
+  const spr=mk(o.w,o.h,o.draw,scale); spr.className='spr'; el.appendChild(spr);
+  if(onFloor){ const sh=document.createElement('div'); sh.className='shadow'; el.appendChild(sh); }
+  const tag=document.createElement('div'); tag.className='tag'; tag.textContent=o.name; el.appendChild(tag);
+  if(o.elec){
+    const plug=fromStr(PLUG,4); plug.classList.add('plug'); plug.style.left=(W-6)+'px'; el.appendChild(plug);
+    const bolt=fromStr(BOLT,3); bolt.classList.add('bolt'); bolt.style.left=(W+20)+'px'; bolt.style.bottom='30px'; el.appendChild(bolt);
+  }
+  const act=()=>choose(o,el);
+  el.addEventListener('click',act);
+  el.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); act(); }});
+  box.appendChild(el);
+}
+
+function badge(el,rows){ const b=fromStr(rows,6); b.classList.add('badge'); el.appendChild(b); }
+
+function choose(o,el){
+  if(over||el.classList.contains('ok')||el.classList.contains('bad')) return;
+  const verb=o.pl?'USE':'USES';
+  if(o.elec){
+    el.classList.add('ok'); badge(el,CHECK); found++; updCount(); sfx.ok();
+    gBubble.className='bubble good';
+    sayGame(`GREAT! ${o.name} ${verb} ELECTRICITY. ${o.why}`);
+    if(found===total){ over=true; setTimeout(showWin,1100); }
+  }else{
+    el.classList.add('bad'); badge(el,XMARK); errors++; drawHearts(); sfx.bad();
+    gBubble.className='bubble bad';
+    sayGame(`OOPS! ${o.name} DOESN'T USE ELECTRICITY. ${o.why}`);
+    if(errors>=3){ over=true; setTimeout(showLose,1100); }
+  }
+}
+
+function showWin(){
+  hero.set(2); document.getElementById('hero').classList.add('jump'); sfx.win();
+  const st=document.getElementById('stars'); st.innerHTML='';
+  const n=3-errors;
+  for(let i=0;i<3;i++) st.appendChild(fromStr(STAR,i===1?11:8, i<n?null:{y:'G'}));
+  document.getElementById('winText').innerHTML=`YOU FOUND ALL ${total} OBJECTS THAT USE ELECTRICITY.<br>${errors===0?'NO MISTAKES! YOU ARE AN EXPERT.':'YOU ARE A GREAT ENERGY DETECTIVE!'}`;
+  const cf=document.getElementById('confetti'); cf.innerHTML='';
+  const cols=['#ffec27','#29adff','#ff004d','#00e436','#ff77a8','#ffa300'];
+  for(let i=0;i<60;i++){ const c=document.createElement('i'); c.style.left=Math.random()*1600+'px'; c.style.background=cols[i%cols.length]; c.style.animationDuration=(1.8+Math.random()*2)+'s'; c.style.animationDelay=(Math.random()*.8)+'s'; cf.appendChild(c); }
+  document.getElementById('win').classList.add('show');
+  document.getElementById('againBtn').focus();
+}
+function showLose(){
+  sfx.lose();
+  const lh=document.getElementById('loseHearts'); lh.innerHTML='';
+  for(let i=0;i<3;i++) lh.appendChild(fromStr(HEART,9,{r:'D',w:'D'}));
+  document.getElementById('lose').classList.add('show');
+  document.getElementById('retryBtn').focus();
+}
+
+function startGame(){
+  ['win','lose','intro'].forEach(id=>document.getElementById(id).classList.remove('show'));
+  document.getElementById('hero').classList.remove('jump'); hero.cur=null; hero.set(0);
+  buildRoom();
+  gBubble.className='bubble';
+  sayGame(`FIND THE ${total} OBJECTS THAT USE ELECTRICITY. CLICK ON THEM!`);
+}
+
+/* ---------- INTRO ---------- */
+const pages=[
+  'HI, EXPLORER! WELCOME TO MY ROOM. I NEED YOUR HELP!',
+  'THERE ARE MANY OBJECTS HERE. SOME USE ELECTRICITY AND SOME DON\'T.',
+  'YOUR MISSION: CLICK ON ALL THE OBJECTS THAT USE ELECTRICITY.',
+  'HINT: THE ONES THAT USE ELECTRICITY GLOW AND HAVE A LITTLE BOLT ON THE PLUG. CAREFUL! IF YOU MAKE 3 MISTAKES, YOU LOSE.'
+];
+let page=0;
+const dots=document.getElementById('dots'), iNext=document.getElementById('iNext'), iHint=document.getElementById('iHint');
+function showPage(){
+  dots.innerHTML=pages.map((_,i)=>`<i class="${i===page?'on':''}"></i>`).join('');
+  iNext.textContent= page===pages.length-1 ? 'LET\'S PLAY!' : 'NEXT';
+  iHint.innerHTML='';
+  if(page===pages.length-1){
+    const row=document.createElement('div'); row.className='hintrow';
+    const plug=fromStr(PLUG,6); const bolt=fromStr(BOLT,5); bolt.style.animation='zap 1s steps(2) infinite';
+    row.appendChild(plug); row.appendChild(bolt); iHint.appendChild(row);
+  }
+  sayIntro(pages[page]);
+}
+iNext.addEventListener('click',()=>{ sfx.blip(); if(page<pages.length-1){ page++; showPage(); } else startGame(); });
+document.getElementById('againBtn').addEventListener('click',startGame);
+document.getElementById('retryBtn').addEventListener('click',startGame);
+const sndBtn=document.getElementById('sndBtn');
+sndBtn.addEventListener('click',()=>{ soundOn=!soundOn; sndBtn.textContent='SOUND: '+(soundOn?'ON':'OFF'); });
+
+buildRoom(); showPage();
+</script>
+</body>
+</html>

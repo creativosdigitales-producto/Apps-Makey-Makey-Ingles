@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The mystery box: conductor or insulator?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Pixelify+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#1d2433;
+  --wall:#2f3f7a;
+  --wall-2:#34468a;
+  --floor:#8a5a3b;
+  --floor-2:#74492f;
+  --paper:#ffffff;
+  --volt:#ffc531;
+  --volt-dark:#c98a00;
+  --iso:#34c3b5;
+  --iso-dark:#1f8379;
+  --ok:#3fcf6b;
+  --bad:#ff5a5a;
+  --page:#1a2246;
+  --pixel:"Press Start 2P", ui-monospace, "Courier New", monospace;
+  --body:"Pixelify Sans", "Trebuchet MS", system-ui, sans-serif;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --page:#0f1530; } }
+:root[data-theme="dark"]{ --page:#0f1530; }
+html{ scroll-padding-top:env(safe-area-inset-top,0px); }
+*,*::before,*::after{ box-sizing:border-box; }
+html,body{ height:100%; margin:0; overflow:hidden; }
+body{ background:var(--page); display:grid; place-items:center; font-family:var(--body); color:var(--ink); -webkit-tap-highlight-color:transparent; }
+
+.stage, .stage button{ text-transform:uppercase; }
+canvas{ image-rendering:pixelated; image-rendering:crisp-edges; display:block; }
+
+.stage{
+  position:relative;
+  width:min(100vw, calc(100svh * 16 / 9));
+  aspect-ratio:16/9;
+  overflow:hidden;
+  container-type:inline-size;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 7.9cqw, rgba(255,255,255,.035) 7.9cqw 8cqw),
+    repeating-linear-gradient(0deg, transparent 0 7.9cqw, rgba(255,255,255,.035) 7.9cqw 8cqw),
+    linear-gradient(var(--wall), var(--wall-2));
+  user-select:none;
+}
+.floor{
+  position:absolute; left:0; right:0; bottom:0; height:14cqw;
+  background:
+    repeating-linear-gradient(90deg, var(--floor) 0 7.6cqw, var(--floor-2) 7.6cqw 8cqw),
+    var(--floor);
+  border-top:.8cqw solid #5b3820;
+}
+.floor::after{ content:""; position:absolute; inset:3.4cqw 0 auto 0; height:.4cqw; background:var(--floor-2); }
+
+/* pixel frame helper */
+.px{
+  background:var(--paper);
+  box-shadow:
+    0 -.45cqw 0 0 var(--ink), 0 .45cqw 0 0 var(--ink),
+    -.45cqw 0 0 0 var(--ink), .45cqw 0 0 0 var(--ink),
+    0 .9cqw 0 0 rgba(0,0,0,.25);
+}
+
+/* HUD */
+.hud{ position:absolute; top:1.6cqw; left:2.4cqw; right:2.4cqw; display:flex; justify-content:space-between; align-items:center; z-index:6; }
+.hud-group{ display:flex; align-items:center; gap:1cqw; padding:.7cqw 1.1cqw; }
+.hud-label{ font-family:var(--pixel); font-size:1cqw; }
+.slots{ display:flex; gap:.35cqw; }
+.slots canvas{ width:1.5cqw; height:auto; opacity:.22; filter:grayscale(1); transition:opacity .2s; }
+.slots canvas.on{ opacity:1; filter:none; animation:pop .35s steps(3); }
+.hearts{ display:flex; gap:.5cqw; }
+.hearts canvas{ width:2.1cqw; height:auto; }
+.hearts canvas.lost{ filter:grayscale(1) brightness(.75); opacity:.45; animation:break .4s steps(4); }
+.count{ font-family:var(--pixel); font-size:1.1cqw; min-width:4.6cqw; text-align:right; }
+
+/* banner */
+.banner{ position:absolute; top:6.4cqw; left:50%; transform:translateX(-50%); width:46cqw; padding:1.1cqw 2cqw 1cqw; text-align:center; z-index:5; }
+.ask{ font-family:var(--pixel); font-size:.95cqw; color:#55607a; margin:0 0 .9cqw; letter-spacing:.02em; }
+.name{ font-family:var(--body); font-weight:700; font-size:3.3cqw; line-height:1; margin:0; }
+.feedback{ font-family:var(--body); font-size:1.4cqw; line-height:1.25; margin:.7cqw 0 0; min-height:3.5cqw; }
+.feedback.ok{ color:#1e8a43; } .feedback.bad{ color:#c23434; }
+
+/* character + bubble */
+.hero{ position:absolute; left:20cqw; bottom:12.4cqw; width:21cqw; z-index:4; animation:idle 1.6s steps(2) infinite; }
+.hero canvas{ width:100%; height:auto; filter:drop-shadow(0 .6cqw 0 rgba(0,0,0,.25)); }
+.hero.hop{ animation:hop .5s steps(4); }
+.hero.no{ animation:no .45s steps(6); }
+.bubble{ position:absolute; left:3cqw; bottom:33cqw; width:17cqw; padding:1cqw 1.2cqw; font-size:1.5cqw; line-height:1.25; z-index:5; }
+.bubble::after{ content:""; position:absolute; right:-1.6cqw; bottom:1.2cqw; width:1.2cqw; height:1.2cqw; background:var(--paper); box-shadow:.45cqw 0 0 0 var(--ink), 0 .45cqw 0 0 var(--ink); }
+
+/* box */
+.box{ position:absolute; left:49cqw; bottom:12.4cqw; width:12cqw; z-index:3; }
+.box .lid{ width:110%; margin-left:-5%; height:auto; position:relative; z-index:2; transform-origin:8% 100%; transition:transform .25s steps(3); }
+.box.open .lid{ transform:translate(-3.2cqw,1.2cqw) rotate(-38deg); }
+.box .body{ width:100%; height:auto; }
+.box.shake{ animation:shake .5s steps(6); }
+.shadow{ position:absolute; left:49.5cqw; bottom:11.6cqw; width:11cqw; height:1.6cqw; background:rgba(0,0,0,.28); z-index:1; }
+
+/* item */
+.item{ position:absolute; left:calc(55cqw - 5.5cqw); width:11cqw; bottom:15cqw; z-index:2; opacity:0; transform:scale(.35);
+  transition:bottom .55s steps(6), transform .55s steps(6), opacity .2s; }
+.item canvas{ width:100%; height:auto; }
+.item.shown{ bottom:25.5cqw; transform:scale(1); opacity:1; z-index:4; animation:float 1.4s steps(2) .6s infinite; }
+.item.good canvas{ filter:drop-shadow(0 0 0 var(--ok)) drop-shadow(.5cqw 0 0 var(--ok)) drop-shadow(-.5cqw 0 0 var(--ok)) drop-shadow(0 .5cqw 0 var(--ok)) drop-shadow(0 -.5cqw 0 var(--ok)); }
+.item.wrong canvas{ filter:drop-shadow(.5cqw 0 0 var(--bad)) drop-shadow(-.5cqw 0 0 var(--bad)) drop-shadow(0 .5cqw 0 var(--bad)) drop-shadow(0 -.5cqw 0 var(--bad)); }
+.item.wrong{ animation:shake .45s steps(6); }
+
+/* answer buttons */
+.answers{ position:absolute; right:4cqw; top:21cqw; display:flex; flex-direction:column; gap:2.4cqw; z-index:5; }
+.btn{
+  font-family:var(--pixel); font-size:1.75cqw; color:var(--ink);
+  width:25cqw; padding:1.7cqw 1.4cqw; border:0; cursor:pointer;
+  display:flex; align-items:center; gap:1.3cqw; text-align:left;
+  box-shadow:
+    0 -.45cqw 0 0 var(--ink), 0 .45cqw 0 0 var(--ink),
+    -.45cqw 0 0 0 var(--ink), .45cqw 0 0 0 var(--ink),
+    inset 0 -.8cqw 0 0 var(--shade);
+  transition:transform .08s steps(1);
+}
+.btn canvas{ width:2.6cqw; height:auto; flex:none; }
+.btn small{ display:block; font-family:var(--body); font-size:1.1cqw; margin-top:.6cqw; opacity:.75; }
+.btn.cond{ background:var(--volt); --shade:var(--volt-dark); }
+.btn.iso{ background:var(--iso); --shade:var(--iso-dark); }
+.btn:hover:not(:disabled){ transform:translateY(-.3cqw); }
+.btn:active:not(:disabled){ transform:translateY(.3cqw); }
+.btn:disabled{ cursor:default; filter:saturate(.35) brightness(.9); }
+.btn:focus-visible{ outline:.4cqw solid #fff; outline-offset:.9cqw; }
+
+/* overlays */
+.overlay{ position:absolute; inset:0; z-index:10; display:none; place-items:center; background:rgba(16,22,48,.72); }
+.overlay.show{ display:grid; }
+.card{ width:46cqw; padding:3cqw 3cqw 2.6cqw; text-align:center; animation:pop .4s steps(4); }
+.card h2{ font-family:var(--pixel); font-size:3.6cqw; margin:0 0 1.8cqw; line-height:1.2; }
+.card p{ font-size:1.8cqw; line-height:1.35; margin:0 auto 2.2cqw; max-width:38cqw; }
+.card .big{ display:flex; justify-content:center; margin-bottom:1.6cqw; }
+.card .big canvas{ width:8cqw; height:auto; }
+.card .btn{ margin:0 auto; width:auto; justify-content:center; }
+.win h2{ color:#c98a00; } .lose h2{ color:#c23434; }
+.confetti{ position:absolute; inset:0; pointer-events:none; }
+.confetti i{ position:absolute; top:-2cqw; width:1cqw; height:1cqw; animation:fall linear forwards; }
+
+.mute{ position:absolute; right:2.4cqw; bottom:2cqw; z-index:7; font-family:var(--pixel); font-size:.8cqw; padding:.8cqw 1cqw; border:0; cursor:pointer; color:var(--ink); }
+.mute:focus-visible{ outline:.3cqw solid #fff; outline-offset:.6cqw; }
+
+@keyframes idle{ 50%{ transform:translateY(-.4cqw); } }
+@keyframes hop{ 0%,100%{ transform:translateY(0);} 40%{ transform:translateY(-3cqw);} 70%{ transform:translateY(-1cqw);} }
+@keyframes no{ 0%,100%{transform:translateX(0);} 20%{transform:translateX(-1cqw);} 40%{transform:translateX(1cqw);} 60%{transform:translateX(-.7cqw);} 80%{transform:translateX(.7cqw);} }
+@keyframes shake{ 0%,100%{transform:translateX(0) rotate(0);} 25%{transform:translateX(-.6cqw) rotate(-3deg);} 50%{transform:translateX(.6cqw) rotate(3deg);} 75%{transform:translateX(-.3cqw) rotate(-1deg);} }
+@keyframes float{ 50%{ transform:translateY(-.6cqw); } }
+@keyframes pop{ 0%{ transform:scale(.6);} 70%{ transform:scale(1.08);} 100%{ transform:scale(1);} }
+@keyframes break{ 0%{ transform:scale(1.4);} 100%{ transform:scale(1);} }
+@keyframes fall{ to{ transform:translateY(62cqw) rotate(540deg); } }
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{ animation-duration:.01s !important; animation-iteration-count:1 !important; transition-duration:.01s !important; }
+}
+</style>
+</head>
+<body>
+<main class="stage" id="stage">
+  <div class="floor"></div>
+
+  <div class="hud">
+    <div class="hud-group px">
+      <span class="hud-label">Score</span>
+      <div class="slots" id="slots"></div>
+      <span class="count" id="count">0/10</span>
+    </div>
+    <div class="hud-group px">
+      <span class="hud-label">Lives</span>
+      <div class="hearts" id="hearts"></div>
+    </div>
+  </div>
+
+  <section class="banner px" aria-live="polite">
+    <p class="ask">Conductor or insulator?</p>
+    <h1 class="name" id="name">…</h1>
+    <p class="feedback" id="feedback"></p>
+  </section>
+
+  <div class="bubble px" id="bubble">Let's see what's in the box!</div>
+  <div class="hero" id="hero"></div>
+
+  <div class="shadow"></div>
+  <div class="item" id="item"></div>
+  <div class="box" id="box"></div>
+
+  <div class="answers">
+    <button class="btn cond" id="btnC" disabled><span id="iconC"></span><span>Conductor<small>Key C</small></span></button>
+    <button class="btn iso" id="btnA" disabled><span id="iconA"></span><span>Insulator<small>Key A</small></span></button>
+  </div>
+
+  <button class="mute px" id="mute" aria-pressed="false">Sound: on</button>
+
+  <div class="overlay show" id="start">
+    <div class="card px">
+      <h2>The mystery box</h2>
+      <p>Objects will come out from inside. Decide if each one lets electricity pass through (conductor) or blocks it (insulator). Reach 10 correct answers before making 3 mistakes.</p>
+      <button class="btn cond" id="go">Start</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="win">
+    <div class="confetti" id="confetti"></div>
+    <div class="card px win">
+      <div class="big" id="winIcon"></div>
+      <h2>You win!</h2>
+      <p id="winText">You got 10 correct.</p>
+      <button class="btn cond" id="again1">Play again</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="lose">
+    <div class="card px lose">
+      <div class="big" id="loseIcon"></div>
+      <h2>You lost</h2>
+      <p id="loseText"></p>
+      <button class="btn iso" id="again2">Try again</button>
+    </div>
+  </div>
+</main>
+
+<script>
+(function(){
+const INK = '#1d2433';
+
+/* ---------- pixel helpers ---------- */
+function canvas(w,h){ const c=document.createElement('canvas'); c.width=w; c.height=h; return c; }
+function outline(c){
+  const x=c.getContext('2d'), d=x.getImageData(0,0,c.width,c.height), W=c.width, H=c.height, a=d.data;
+  const solid=(i,j)=> i>=0&&j>=0&&i<W&&j<H&&a[(j*W+i)*4+3]>0&&!(a[(j*W+i)*4]===29&&a[(j*W+i)*4+1]===36&&a[(j*W+i)*4+2]===52&&a[(j*W+i)*4+3]===254);
+  const mark=[];
+  for(let j=0;j<H;j++)for(let i=0;i<W;i++){
+    if(a[(j*W+i)*4+3]===0 && (solid(i-1,j)||solid(i+1,j)||solid(i,j-1)||solid(i,j+1))) mark.push(j*W+i);
+  }
+  mark.forEach(p=>{ a[p*4]=29;a[p*4+1]=36;a[p*4+2]=52;a[p*4+3]=255; });
+  x.putImageData(d,0,0); return c;
+}
+function fromMap(map,pal){
+  const h=map.length,w=Math.max(...map.map(r=>r.length)), c=canvas(w,h), x=c.getContext('2d');
+  map.forEach((row,j)=>[...row].forEach((ch,i)=>{ if(pal[ch]){ x.fillStyle=pal[ch]; x.fillRect(i,j,1,1);} }));
+  return c;
+}
+/* draw on a 16x16 grid with a 1px margin, then outline */
+function draw16(fn, size=16){
+  const c=canvas(size+2,size+2), x=c.getContext('2d'); x.translate(1,1);
+  const R=(a,b,w,h,col)=>{ if(col===null){ x.clearRect(a,b,w,h);} else { x.fillStyle=col; x.fillRect(a,b,w,h);} };
+  const D=(cx,cy,r,col)=>{ for(let j=0;j<size;j++)for(let i=0;i<size;i++){ if((i+.5-cx)**2+(j+.5-cy)**2<=r*r) R(i,j,1,1,col);} };
+  const atop=f=>{ x.globalCompositeOperation='source-atop'; f(); x.globalCompositeOperation='source-over'; };
+  fn(R,D,atop); return outline(c);
+}
+
+/* ---------- character ---------- */
+const HERO_PAL={k:INK,w:'#f4f6fa',g:'#c9d0dc',s:'#8f9aae',b:'#3fa9f5',d:'#1f6fb8',f:'#f2c6a0',e:'#2a1e1a',p:'#e8968a',t:'#3a4250'};
+const HERO=[
+"......kkkkkkkk......",
+"....kkwwwwwwwwkk....",
+"...kwwwwwwwwwwwgk...",
+"..kwwwwwwwwwwwwwgk..",
+"..kwwwwwwwwwwwwwgk..",
+".kbwwkkkkkkkkkkwgbk.",
+".kbwkffffffffffkgbk.",
+".kdwkffeeffeeffkgdk.",
+".kdwkffeeffeeffkgdk.",
+".kbwkfpffeeffpfkgbk.",
+".kbwkffffffffffkgbk.",
+"..kwwkkkkkkkkkkwgk..",
+"..kgwwwwwwwwwwwwgk..",
+"...kkggggggggggkk...",
+"..kwkwwwbbbbwwwkwk..",
+".kwwkwwbddddbwwkwwk.",
+".kwgkwwbdbbdbwwkgwk.",
+".kggkwwwbbbbwwwkggk.",
+"..kk.kwwwwwwwwk.kk..",
+".....kssskksssk.....",
+".....kwwk..kwwk.....",
+".....kbbk..kbbk.....",
+"....kttttk.ttttk....",
+"....kkkkkk.kkkkk...."
+];
+document.getElementById('hero').appendChild(fromMap(HERO,HERO_PAL));
+
+/* ---------- box ---------- */
+function boxBody(){ return draw16((R)=>{
+  R(0,0,24,16,'#7b4fc9'); R(0,0,24,1,'#9a74e6'); R(0,12,24,4,'#5a34a0');
+  R(2,0,2,16,'#f2c14e'); R(20,0,2,16,'#f2c14e'); R(2,12,2,4,'#c9962c'); R(20,12,2,4,'#c9962c');
+  const q=[".yyyy.","yy..yy","....yy","...yy.","..yy..","..yy..","......","..yy.."];
+  q.forEach((row,j)=>[...row].forEach((ch,i)=>{ if(ch==='y') R(9+i,2+j,1,1,'#ffe066'); }));
+},24); }
+function boxLid(){ return draw16((R)=>{
+  R(0,0,26,5,'#8f63dd'); R(0,0,26,1,'#b08cf0'); R(0,4,26,1,'#5a34a0');
+  R(3,0,2,5,'#f2c14e'); R(21,0,2,5,'#f2c14e');
+},26); }
+(function(){
+  const b=document.getElementById('box');
+  const lid=boxLid(); lid.className='lid';
+  // crop lid canvas height (draw16 makes a square)
+  const l2=canvas(28,7); l2.getContext('2d').drawImage(lid,0,0); l2.className='lid';
+  const body=boxBody(); const b2=canvas(26,18); b2.getContext('2d').drawImage(body,0,0); b2.className='body';
+  b.append(l2,b2);
+})();
+
+/* ---------- small icons ---------- */
+const BOLT=fromMap(["..yyyy","..yyy.",".yyy..","yyyyyy","..yyy.",".yyy..",".yy...","yy...."],{y:'#ffc531'});
+const HEART_MAP=[".rr.rr.","rrrrrrr","rwrrrrr",".rrrrr.","..rrr..","...r..."];
+function pad(c){ const p=canvas(c.width+2,c.height+2); p.getContext('2d').drawImage(c,1,1); return outline(p); }
+const bolt=()=>{ const c=pad(BOLT); return c; };
+const heart=()=>pad(fromMap(HEART_MAP,{r:'#ff4f6d',w:'#ffc2cc'}));
+const shield=()=>draw16((R)=>{ R(3,2,10,7,'#e8f8f6'); R(4,9,8,2,'#e8f8f6'); R(5,11,6,2,'#e8f8f6'); R(7,13,2,1,'#e8f8f6'); R(7,4,2,7,'#1f8379'); R(5,6,6,2,'#1f8379'); });
+document.getElementById('iconC').appendChild(pad(fromMap(["..yyyy","..yyy.",".yyy..","yyyyyy","..yyy.",".yyy..",".yy...","yy...."],{y:'#fff7d1'})));
+document.getElementById('iconA').appendChild(shield());
+
+/* ---------- items ---------- */
+const STEEL='#c9d0dc', STEEL_D='#8f9aae', STEEL_L='#eef1f6', GOLD='#f2c14e', GOLD_D='#b8862b', GOLD_L='#fff1a8', WOOD='#b7793f', WOOD_D='#8a5428';
+const ITEMS=[
+ // conductores
+ {n:'Gold ring', c:true, why:'Gold is a metal: electrons move freely through it.', d:(R,D)=>{ D(8,9,6,GOLD); D(8,9,3.8,null); R(4,5,2,1,GOLD_L); R(3,7,1,2,GOLD_L); R(9,13,3,1,GOLD_D); R(12,10,1,2,GOLD_D); R(7,1,2,2,'#7fd8ff'); R(8,1,1,1,'#ffffff'); }},
+ {n:'Iron nail', c:true, why:'Iron is a metal, so it conducts electricity.', d:(R)=>{ R(3,1,10,3,STEEL_D); R(3,1,10,1,STEEL); R(7,4,2,9,STEEL_D); R(7,4,1,9,STEEL); R(7,13,2,1,STEEL_D); R(7,14,1,1,STEEL_D); }},
+ {n:'Metal spoon', c:true, why:'Metal cutlery lets electric current pass through.', d:(R,D)=>{ D(8,4.5,3.6,STEEL); R(6,2,2,2,STEEL_L); R(9,6,2,1,STEEL_D); R(7,8,2,8,STEEL_D); R(7,8,1,8,STEEL); }},
+ {n:'Steel fork', c:true, why:'Steel is a mix of metals and conducts very well.', d:(R)=>{ [4,6,8,10].forEach(x=>R(x,0,1,6,STEEL)); R(4,6,7,2,STEEL); R(4,7,7,1,STEEL_D); R(6,8,3,1,STEEL_D); R(6,9,3,7,STEEL_D); R(6,9,1,7,STEEL); }},
+ {n:'Copper cable', c:true, why:'Copper is the metal used inside cables because it conducts very well.', d:(R,D)=>{ [4,8,12].forEach(cx=>{ D(cx,8,3,'#e08a4a'); D(cx,8,1.6,null); }); R(0,7,2,2,'#e08a4a'); R(14,7,2,2,'#e08a4a'); R(3,5,2,1,'#ffc08a'); R(7,5,2,1,'#ffc08a'); R(11,5,2,1,'#ffc08a'); R(4,10,2,1,'#a3562a'); R(8,10,2,1,'#a3562a'); R(12,10,2,1,'#a3562a'); }},
+ {n:'Coin', c:true, why:'Coins are made of metals, so they conduct.', d:(R,D)=>{ D(8,8,7,GOLD_D); D(8,8,5.6,GOLD); R(7,4,2,8,GOLD_D); R(5,5,2,6,GOLD_D); R(9,5,2,6,GOLD_D); R(7,5,2,6,GOLD); R(4,3,2,1,GOLD_L); R(3,4,1,2,GOLD_L); }},
+ {n:'Metal key', c:true, why:'Keys are made of metal and electricity passes through them.', d:(R,D)=>{ D(4.5,8,4,'#d9b24a'); D(4.5,8,1.6,null); R(8,7,8,2,'#d9b24a'); R(8,7,8,1,GOLD_L); R(12,9,1,2,'#d9b24a'); R(14,9,2,3,'#d9b24a'); R(2,5,2,1,GOLD_L); }},
+ {n:'Aluminum foil', c:true, why:'Even though it looks like paper, it is a sheet of aluminum: a metal.', d:(R,D)=>{ D(8,9,6.4,STEEL); [[4,5],[9,4],[11,8],[6,9],[8,12],[12,11],[3,10]].forEach(([x,y])=>R(x,y,2,1,STEEL_D)); [[6,5],[10,6],[5,7],[9,10],[4,12]].forEach(([x,y])=>R(x,y,1,1,'#ffffff')); }},
+ {n:'Metal clip', c:true, why:'Clips are made of metal wire and conduct current.', d:(R)=>{ const c='#aab4c5'; R(4,1,7,2,c); R(3,2,2,13,c); R(11,2,2,10,c); R(4,14,7,2,c); R(10,12,2,3,c); R(7,4,2,9,c); R(4,1,7,1,STEEL_L); }},
+ {n:'Soda can', c:true, why:'Cans are made of aluminum, a metal that conducts electricity.', d:(R)=>{ R(4,3,8,11,'#e04848'); R(5,1,6,1,STEEL_D); R(4,2,8,1,STEEL); R(4,14,8,1,STEEL); R(5,15,6,1,STEEL_D); R(4,7,8,2,'#ffffff'); R(5,3,1,11,'#ff8f8f'); R(7,1,2,1,STEEL_L); }},
+ {n:'Aluminum pot', c:true, why:'Aluminum is a metal: it conducts electricity and also heat.', d:(R)=>{ R(3,6,10,8,STEEL); R(3,11,10,3,STEEL_D); R(2,5,12,1,STEEL_L); R(0,7,3,2,STEEL_D); R(13,7,3,2,STEEL_D); R(5,3,6,2,STEEL_D); R(7,2,2,1,'#3a4250'); R(4,7,1,4,'#ffffff'); }},
+ {n:'Screw', c:true, why:'Screws are made of steel, a metal, so they conduct.', d:(R)=>{ R(3,1,10,3,STEEL); R(3,1,10,1,STEEL_L); R(7,1,2,2,STEEL_D); R(6,4,4,10,STEEL_D); for(let y=4;y<14;y+=2) R(5,y,6,1,STEEL); R(7,14,2,1,STEEL_D); }},
+ // aislantes
+ {n:'Wooden chair', c:false, why:'Dry wood does not let electricity pass: it is an insulator.', d:(R)=>{ R(4,0,2,9,WOOD_D); R(10,0,2,9,WOOD_D); R(4,1,8,2,WOOD); R(4,4,8,2,WOOD); R(3,9,10,2,WOOD); R(3,9,10,1,'#d49a5e'); R(4,11,2,5,WOOD_D); R(10,11,2,5,WOOD_D); }},
+ {n:'Eraser', c:false, why:'Rubber is an insulating material: it stops the current.', d:(R)=>{ R(1,5,8,6,'#f48fb1'); R(9,5,6,6,'#5b8def'); R(1,5,14,1,'#ffd0e0'); R(9,5,6,1,'#9dbcff'); R(1,10,14,1,'#c45f84'); }},
+ {n:'Glass cup', c:false, why:'Glass is an insulator: it does not let electricity pass.', d:(R)=>{ R(4,1,9,13,'#d7f1fa'); R(5,14,7,1,'#d7f1fa'); R(4,7,9,7,'#8fd3ee'); R(5,2,1,11,'#ffffff'); R(11,2,1,11,'#b3e1f2'); }},
+ {n:'Plastic bottle', c:false, why:'Plastic is an insulator, that is why it is used to cover cables.', d:(R)=>{ R(6,0,4,2,'#2f7de1'); R(6,2,4,3,'#bde6f3'); R(4,5,8,11,'#bde6f3'); R(4,8,8,4,'#3fb36b'); R(5,5,1,11,'#ffffff'); R(5,8,1,4,'#7ed69c'); }},
+ {n:'Rubber gloves', c:false, why:'Rubber insulates: that is why electricians wear rubber gloves.', d:(R)=>{ const y='#ffd23f'; R(3,6,9,7,y); R(3,2,2,4,y); R(5,1,2,5,y); R(7,0,2,6,y); R(9,1,2,5,y); R(12,6,2,2,y); R(13,7,2,3,y); R(4,13,7,3,'#e0a800'); R(5,2,0,0,y); R(5,1,1,5,'#e0a800'); R(7,1,1,5,'#e0a800'); R(9,1,1,5,'#e0a800'); }},
+ {n:'Ceramic mug', c:false, why:'Ceramic is an insulator: it does not conduct electricity.', d:(R)=>{ R(2,3,10,11,'#ffffff'); R(3,4,8,1,'#6b3e22'); R(2,7,10,2,'#3fa9f5'); R(12,5,3,2,'#ffffff'); R(14,6,2,5,'#ffffff'); R(12,10,3,2,'#ffffff'); R(2,12,10,2,'#d8dde6'); }},
+ {n:'Wool scarf', c:false, why:'Wool is a natural insulating fiber.', d:(R)=>{ for(let x=1;x<15;x+=4){ R(x,3,2,4,'#e2453c'); R(x+2,3,2,4,'#ffffff'); } for(let y=7;y<14;y+=2){ R(9,y,4,1,'#e2453c'); R(9,y+1,4,1,'#ffffff'); } [9,11].forEach(x=>R(x,14,1,2,'#e2453c')); }},
+ {n:'Cork', c:false, why:'Cork comes from the bark of a tree and is an insulator.', d:(R)=>{ R(4,2,8,12,'#c99a5e'); R(4,2,8,2,'#dcb47c'); R(5,14,6,1,'#c99a5e'); [[5,5],[9,6],[7,8],[10,10],[6,11],[8,13]].forEach(([x,y])=>R(x,y,1,1,'#8a5f30')); }},
+ {n:'Balloon', c:false, why:'The balloon is made of latex, a rubber that does not conduct electricity.', d:(R,D)=>{ D(8,6,5.6,'#ef4f6b'); R(5,3,2,2,'#ff9fb0'); R(7,11,2,1,'#c23651'); R(7,12,2,1,'#ef4f6b'); R(8,13,1,3,'#ffffff'); }},
+ {n:'Plastic ruler', c:false, why:'Plastic is an insulator: electricity does not pass through it.', d:(R)=>{ R(0,5,16,5,'#ffd84d'); R(0,5,16,1,'#fff0a6'); for(let x=1;x<16;x+=2) R(x,6,1,x%4===1?3:2,'#8a6a00'); }},
+ {n:'Sheet of paper', c:false, why:'Dry paper is an insulating material.', d:(R)=>{ R(3,0,10,16,'#ffffff'); R(10,0,3,3,null); R(10,0,1,3,'#d8dde6'); R(10,2,3,1,'#d8dde6'); for(let y=5;y<15;y+=2) R(5,y,6,1,'#9fc4ea'); }},
+ {n:'Rubber ball', c:false, why:'Rubber is an insulator, even though the ball bounces a lot.', d:(R,D,atop)=>{ D(8,8,7,'#e64545'); atop(()=>{ R(0,7,16,3,'#ffd23f'); R(4,3,2,2,'#ff9a9a'); R(0,13,16,3,'#b52f2f'); }); }},
+];
+ITEMS.forEach(it=>it.sprite=draw16(it.d));
+
+/* ---------- audio ---------- */
+let ac=null, muted=false;
+function tone(freq,dur=0.12,type='square',when=0,vol=0.06){
+  if(muted) return;
+  try{
+    ac = ac || new (window.AudioContext||window.webkitAudioContext)();
+    const o=ac.createOscillator(), g=ac.createGain(), t=ac.currentTime+when;
+    o.type=type; o.frequency.setValueAtTime(freq,t); g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g).connect(ac.destination); o.start(t); o.stop(t+dur);
+  }catch(e){}
+}
+const sfx={
+  pop:()=>{ tone(330,.08); tone(520,.1,'square',.07); },
+  ok:()=>{ tone(660,.09); tone(880,.09,'square',.09); tone(1175,.16,'square',.18); },
+  bad:()=>{ tone(220,.14,'sawtooth'); tone(150,.22,'sawtooth',.13); },
+  win:()=>{ [523,659,784,1047,784,1047].forEach((f,i)=>tone(f,.14,'square',i*.12)); },
+  lose:()=>{ [392,330,262,196].forEach((f,i)=>tone(f,.2,'triangle',i*.18,.08)); }
+};
+
+/* ---------- state ---------- */
+const GOAL=10, LIVES=3;
+const $=id=>document.getElementById(id);
+const slots=$('slots'), hearts=$('hearts'), nameEl=$('name'), fb=$('feedback'), bubble=$('bubble'),
+      hero=$('hero'), box=$('box'), itemEl=$('item'), btnC=$('btnC'), btnA=$('btnA');
+let deck=[], score=0, lives=LIVES, current=null, busy=true, timer=null;
+
+function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+function buildHud(){
+  slots.innerHTML=''; for(let i=0;i<GOAL;i++) slots.appendChild(bolt());
+  hearts.innerHTML=''; for(let i=0;i<LIVES;i++) hearts.appendChild(heart());
+  $('count').textContent=`${score}/${GOAL}`;
+}
+function setButtons(on){ btnC.disabled=!on; btnA.disabled=!on; busy=!on; }
+function restartAnim(el,cls){ el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+
+const IDLE_LINES=['What do we have here?','Look what I found!','This one is curious...','Will electricity pass through?','Let\'s see, let\'s see...'];
+
+function newRound(){
+  if(deck.length===0) deck=shuffle(ITEMS.slice());
+  current=deck.pop();
+  itemEl.className='item'; itemEl.innerHTML=''; itemEl.appendChild(current.sprite);
+  nameEl.textContent='…'; fb.textContent=''; fb.className='feedback';
+  bubble.textContent='Let\'s see what\'s in the box!';
+  box.classList.remove('open'); restartAnim(box,'shake');
+  timer=setTimeout(()=>{
+    box.classList.add('open'); sfx.pop();
+    itemEl.classList.add('shown');
+    nameEl.textContent=current.n;
+    bubble.textContent=IDLE_LINES[Math.floor(Math.random()*IDLE_LINES.length)]+' Conductor or insulator?';
+    setTimeout(()=>setButtons(true),350);
+  },550);
+}
+
+function answer(isConductor){
+  if(busy||!current) return;
+  setButtons(false);
+  const right = isConductor===current.c;
+  const kind = current.c ? 'conductor' : 'insulator';
+  if(right){
+    score++; sfx.ok();
+    slots.children[score-1].classList.add('on');
+    $('count').textContent=`${score}/${GOAL}`;
+    itemEl.classList.add('good'); restartAnim(hero,'hop');
+    fb.className='feedback ok'; fb.textContent=`Correct! It's a ${kind}. ${current.why}`;
+    bubble.textContent='Yes! Well done!';
+  }else{
+    lives--; sfx.bad();
+    hearts.children[lives].classList.add('lost');
+    itemEl.classList.add('wrong'); restartAnim(hero,'no');
+    fb.className='feedback bad'; fb.textContent=`No: it's a ${kind}. ${current.why}`;
+    bubble.textContent='Oops! Almost...';
+  }
+  timer=setTimeout(()=>{
+    if(score>=GOAL) return showWin();
+    if(lives<=0) return showLose();
+    itemEl.classList.remove('shown'); box.classList.remove('open');
+    timer=setTimeout(newRound,450);
+  },2600);
+}
+
+function confetti(){
+  const box=$('confetti'); box.innerHTML='';
+  const cols=['#ffc531','#34c3b5','#ff4f6d','#3fa9f5','#ffffff'];
+  for(let i=0;i<40;i++){
+    const p=document.createElement('i');
+    p.style.left=Math.random()*100+'%'; p.style.background=cols[i%cols.length];
+    p.style.animationDuration=(1.6+Math.random()*1.8)+'s'; p.style.animationDelay=(Math.random()*.8)+'s';
+    box.appendChild(p);
+  }
+}
+function showWin(){
+  sfx.win(); confetti();
+  const fails=LIVES-lives;
+  $('winText').textContent = fails===0 ? '10 correct with no mistakes! You can now tell conductors from insulators.' : `You got 10 correct with ${fails} ${fails===1?'mistake':'mistakes'}. You can now tell conductors from insulators.`;
+  $('win').classList.add('show'); $('again1').focus();
+}
+function showLose(){
+  sfx.lose();
+  $('loseText').textContent=`You reached ${score} ${score===1?'correct answer':'correct answers'}. Hint: metals conduct; wood, plastic, rubber and glass insulate.`;
+  $('lose').classList.add('show'); $('again2').focus();
+}
+function start(){
+  clearTimeout(timer);
+  ['start','win','lose'].forEach(id=>$(id).classList.remove('show'));
+  score=0; lives=LIVES; deck=shuffle(ITEMS.slice()); buildHud(); setButtons(false);
+  itemEl.className='item'; box.classList.remove('open');
+  setTimeout(newRound,250);
+}
+
+/* icons on end cards */
+(function(){ const w=bolt(); $('winIcon').appendChild(w); const l=heart(); l.style.filter='grayscale(1)'; $('loseIcon').appendChild(l); })();
+
+btnC.addEventListener('click',()=>answer(true));
+btnA.addEventListener('click',()=>answer(false));
+$('go').addEventListener('click',start);
+$('again1').addEventListener('click',start);
+$('again2').addEventListener('click',start);
+$('mute').addEventListener('click',e=>{ muted=!muted; e.currentTarget.textContent='Sound: '+(muted?'off':'on'); e.currentTarget.setAttribute('aria-pressed',String(muted)); });
+document.addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  if(k==='c') answer(true);
+  else if(k==='a') answer(false);
+});
+buildHud();
+nameEl.textContent='What will come out?';
+})();
+</script>
+</body>
+</html>

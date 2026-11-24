@@ -1,0 +1,2084 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Great Jelly</title>
+  <style>
+    /* ============================================================
+       PALETA — única fuente de colores. El JavaScript la lee de aquí,
+       así que basta con cambiar estos valores para recolorear el juego.
+       ============================================================ */
+    :root {
+      --crema: #fff4dc;          /* suelo */
+      --crema-sombra: #f1dcb4;   /* sombras del suelo */
+      --lavanda: #cdb9f2;        /* paredes */
+      --lavanda-sombra: #9b83cf; /* cara frontal de las paredes */
+      --fresa: #ff6b8f;          /* mamá gelatina */
+      --limon: #ffd84a;          /* bebé 1 */
+      --menta: #5fe2b2;          /* bebé 2 */
+      --uva: #9f66ec;            /* bebé 3 */
+      --contorno: #4a2e5c;       /* contornos gruesos y texto */
+      --blanco: #ffffff;         /* brillos */
+
+      --borde: 5px;
+      --fuente: "Arial Rounded MT Bold", "Trebuchet MS", "Segoe UI", Verdana, system-ui, sans-serif;
+      --escala: 1;               /* la calcula el JS para que el escenario quepa en la ventana */
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* Nada de scroll: ni en la página ni dentro del iframe de Genially. */
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      font-family: var(--fuente);
+      color: var(--contorno);
+      background: var(--lavanda);
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* ============================================================
+       ESCENARIO 15:8 — todo el juego vive en un rectángulo fijo de
+       1500×800 px que se escala entero (como una diapositiva) para
+       caber en la ventana o el iframe, sin deformarse ni hacer scroll.
+       ============================================================ */
+    #escenario {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 1500px;
+      height: 800px;
+      transform: translate(-50%, -50%) scale(var(--escala));
+      overflow: hidden;
+      background-color: var(--lavanda);
+      background-image: repeating-conic-gradient(rgba(255, 255, 255, .22) 0 25%, transparent 0 50%);
+      background-size: 56px 56px;
+    }
+
+    #app {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      height: 100%;
+    }
+
+    /* ---------- Columna lateral (estado del juego) ---------- */
+    .panel-lateral {
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+      min-height: 0;
+      padding: 28px 14px 24px 28px;
+    }
+    .marca {
+      font-size: 31px;
+      font-weight: 800;
+      line-height: 1;
+      color: var(--fresa);
+      text-shadow:
+        -2px -2px 0 var(--contorno), 2px -2px 0 var(--contorno),
+        -2px 2px 0 var(--contorno), 2px 2px 0 var(--contorno),
+        0 4px 0 var(--contorno);
+    }
+    .hud-nivel { display: flex; flex-direction: column; gap: 4px; }
+    #hud-numero { font-size: 28px; font-weight: 800; }
+    #hud-nombre { font-size: 19px; line-height: 1.2; opacity: .8; }
+
+    .hud-bebes {
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      padding: 12px;
+      background: var(--crema);
+      border: var(--borde) solid var(--contorno);
+      border-radius: 24px;
+      box-shadow: 0 5px 0 var(--contorno);
+    }
+    /* mini gelatina hecha solo con CSS */
+    .bebe-hud {
+      position: relative;
+      width: 52px;
+      height: 42px;
+      border: 5px solid var(--contorno);
+      border-radius: 55% 55% 30% 30% / 70% 70% 30% 30%;
+      background: var(--crema-sombra);
+      opacity: .4;
+      transition: opacity .2s;
+    }
+    .bebe-hud::after {
+      content: "";
+      position: absolute;
+      left: 20%; top: 18%;
+      width: 20%; height: 20%;
+      background: var(--blanco);
+      border-radius: 2px;
+    }
+    .bebe-hud.recogido { background: var(--color-bebe); opacity: 1; animation: pop .45s ease-out; }
+
+    /* Bocadillo de mensajes: ocupa siempre su sitio para que nada salte */
+    #mensaje {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 124px;
+      padding: 14px 16px;
+      background: var(--blanco);
+      border: 4px solid var(--contorno);
+      border-radius: 22px;
+      box-shadow: 0 5px 0 var(--contorno);
+      font-size: 21px;
+      font-weight: 800;
+      line-height: 1.25;
+      text-align: center;
+      opacity: 0;
+      transform: scale(.94);
+      transition: opacity .25s, transform .25s;
+    }
+    #mensaje.visible { opacity: 1; transform: none; }
+
+    .hud-botones { display: flex; flex-direction: column; gap: 14px; margin-top: auto; }
+    .hud-botones .boton { width: 100%; }
+
+    .ayuda { font-size: 14px; line-height: 1.75; opacity: .75; }
+    kbd {
+      font-family: inherit;
+      font-weight: 800;
+      background: var(--crema);
+      border: 2px solid var(--contorno);
+      border-radius: 6px;
+      padding: 0 .35em;
+    }
+
+    /* ---------- Zona del laberinto ---------- */
+    #zona-juego {
+      display: grid;
+      place-items: center;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      padding: 24px 28px 34px 14px;
+    }
+    #lienzo {
+      display: block;
+      image-rendering: crisp-edges;
+      image-rendering: pixelated;
+      border: 6px solid var(--contorno);
+      border-radius: 14px;
+      box-shadow: 0 10px 0 rgba(74, 46, 92, .35);
+      background: var(--crema);
+    }
+
+    /* ---------- Botones con forma de gelatina ---------- */
+    .boton {
+      font-family: inherit;
+      font-weight: 800;
+      font-size: 21px;
+      color: var(--blanco);
+      background: var(--fresa);
+      border: var(--borde) solid var(--contorno);
+      border-radius: 18px;
+      padding: 10px 20px;
+      box-shadow: 0 5px 0 var(--contorno);
+      text-shadow: 2px 2px 0 var(--contorno);
+      cursor: pointer;
+      transition: transform .08s, box-shadow .08s;
+    }
+    .boton:active { transform: translateY(4px); box-shadow: 0 1px 0 var(--contorno); }
+    .boton:focus-visible { outline: 4px dashed var(--contorno); outline-offset: 4px; }
+    .boton-crema { background: var(--crema); color: var(--contorno); text-shadow: none; }
+    .boton-grande {
+      font-size: 38px;
+      padding: 12px 56px;
+      border-radius: 26px;
+      box-shadow: 0 7px 0 var(--contorno);
+      animation: latido 1.8s ease-in-out infinite;
+    }
+    .boton-enlace {
+      font: inherit;
+      font-size: 17px;
+      background: none;
+      border: none;
+      color: var(--contorno);
+      text-decoration: underline;
+      opacity: .7;
+      cursor: pointer;
+    }
+
+    /* ---------- Pantallas superpuestas (dentro del escenario) ---------- */
+    .pantalla {
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      display: grid;
+      place-items: center;
+      padding: 40px;
+      background: rgba(205, 185, 242, .6);
+    }
+    .pantalla[hidden] { display: none; }
+
+    .tarjeta {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+      width: 100%;
+      max-width: 900px;
+      overflow: hidden;
+      padding: 40px 56px;
+      background: var(--crema);
+      border: 6px solid var(--contorno);
+      border-radius: 30px;
+      box-shadow: 0 12px 0 var(--contorno);
+      text-align: center;
+      animation: entrar .35s ease-out;
+    }
+    /* Inicio y calibración aprovechan el formato apaisado: dos columnas */
+    .tarjeta-horizontal {
+      flex-direction: row;
+      gap: 52px;
+      max-width: 1140px;
+      text-align: left;
+    }
+    .columna { display: flex; flex-direction: column; align-items: flex-start; gap: 18px; min-width: 0; }
+
+    .titulo, h2 {
+      color: var(--fresa);
+      line-height: 1.02;
+      /* contorno grueso de 4 lados + sombra dura: letras de gelatina */
+      text-shadow:
+        -3px -3px 0 var(--contorno), 3px -3px 0 var(--contorno),
+        -3px 3px 0 var(--contorno), 3px 3px 0 var(--contorno),
+        0 7px 0 var(--contorno);
+    }
+    .titulo { font-size: 92px; }
+    h2 { font-size: 54px; }
+
+    .instruccion { font-size: 28px; font-weight: 800; line-height: 1.25; max-width: 26ch; }
+    .susurro { font-size: 18px; opacity: .7; }
+
+    .mini { image-rendering: crisp-edges; image-rendering: pixelated; }
+    #lienzo-inicio { width: 340px; aspect-ratio: 28 / 24; flex: none; }
+    #lienzo-final { width: 540px; aspect-ratio: 64 / 26; }
+
+    .estrellas { display: flex; gap: 20px; }
+    .estrellas canvas {
+      width: 104px;
+      aspect-ratio: 1;
+      image-rendering: crisp-edges;
+      image-rendering: pixelated;
+      opacity: 0;
+    }
+    .estrellas canvas.aparece { animation: estrella .5s cubic-bezier(.3, 1.6, .5, 1) forwards; }
+
+    /* ---------- Panel de calibración ---------- */
+    .tarjeta-calibracion { max-width: 1240px; align-items: center; gap: 40px; padding: 36px 44px; }
+    .tarjeta-calibracion h2 { font-size: 42px; }
+    .cruz {
+      flex: none;
+      display: grid;
+      grid-template-columns: repeat(3, 156px);
+      grid-template-areas:
+        ". arriba ."
+        "izquierda centro derecha"
+        ". abajo .";
+      gap: 10px;
+    }
+    .flecha {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 116px;
+      padding: 8px;
+      background: var(--blanco);
+      border: 5px solid var(--contorno);
+      border-radius: 18px;
+      text-align: center;
+      transition: background .1s, transform .1s;
+    }
+    .flecha[data-code="ArrowUp"] { grid-area: arriba; }
+    .flecha[data-code="ArrowLeft"] { grid-area: izquierda; }
+    .flecha[data-code="ArrowRight"] { grid-area: derecha; }
+    .flecha[data-code="ArrowDown"] { grid-area: abajo; }
+    .flecha .simbolo { font-size: 34px; line-height: 1; }
+    .flecha .nombre { font-size: 18px; font-weight: 800; }
+    .flecha .contador { font-size: 13px; line-height: 1.3; opacity: .85; }
+    .flecha.pulsada { background: var(--limon); transform: scale(1.06); }
+    .flecha.destello { animation: destello .4s; }
+    .centro {
+      grid-area: centro;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-size: 15px;
+    }
+    #calib-ultima { font-size: 21px; font-weight: 800; }
+    .nota { font-size: 17px; line-height: 1.4; }
+    #calib-niveles {
+      width: 100%;
+      max-height: 132px;
+      overflow: hidden;
+      padding: 10px 14px;
+      font-size: 14px;
+      line-height: 1.4;
+      white-space: pre-line;
+      background: var(--blanco);
+      border: 3px solid var(--contorno);
+      border-radius: 12px;
+    }
+    .fila-botones { display: flex; flex-wrap: wrap; gap: 14px; }
+
+    /* ---------- Aviso de foco ----------
+       Dentro de un iframe, las teclas solo llegan al juego si el iframe tiene el foco.
+       Si no lo tiene, las flechas de la Makey Makey las recibe Genially (y cambia de diapositiva). */
+    #aviso-foco {
+      position: absolute;
+      inset: 0;
+      z-index: 30;
+      display: grid;
+      place-items: center;
+      background: rgba(74, 46, 92, .45);
+      border: none;
+      font: inherit;
+      color: var(--contorno);
+      cursor: pointer;
+    }
+    #aviso-foco[hidden] { display: none; }
+    #aviso-foco span {
+      padding: 22px 40px;
+      background: var(--limon);
+      border: 6px solid var(--contorno);
+      border-radius: 26px;
+      box-shadow: 0 8px 0 var(--contorno);
+      font-size: 36px;
+      font-weight: 800;
+      animation: latido 1.8s ease-in-out infinite;
+    }
+
+    /* ---------- Animaciones ---------- */
+    @keyframes latido { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+    @keyframes pop { 0% { transform: scale(.4); } 70% { transform: scale(1.25); } 100% { transform: scale(1); } }
+    @keyframes entrar { from { transform: translateY(20px) scale(.96); opacity: 0; } to { transform: none; opacity: 1; } }
+    @keyframes estrella { 0% { opacity: 0; transform: scale(.2) rotate(-30deg); } 100% { opacity: 1; transform: scale(1) rotate(0); } }
+    @keyframes destello { 0% { background: var(--menta); } 100% { background: var(--blanco); } }
+
+    @media (prefers-reduced-motion: reduce) {
+      .boton-grande, .tarjeta, #aviso-foco span { animation: none; }
+    }
+  </style>
+</head>
+<body>
+
+ <div id="escenario">
+  <main id="app">
+    <aside class="panel-lateral" aria-label="Game status">
+      <p class="marca">The Great Jelly</p>
+      <div class="hud-nivel">
+        <span id="hud-numero">Level 1 of 10</span>
+        <span id="hud-nombre"></span>
+      </div>
+      <div class="hud-bebes" id="hud-bebes" aria-label="Babies found"></div>
+      <p id="mensaje" role="status" aria-live="polite"></p>
+      <div class="hud-botones">
+        <button class="boton" id="boton-reiniciar" type="button">↻ Restart</button>
+        <button class="boton boton-crema" id="boton-musica" type="button" aria-pressed="true">♪ Music</button>
+      </div>
+      <footer class="ayuda">
+        For adults:<br>
+        <kbd>C</kbd> calibrate &nbsp; <kbd>R</kbd> restart<br>
+        <kbd>M</kbd> music &nbsp; <kbd>F</kbd> fullscreen
+      </footer>
+    </aside>
+
+    <section id="zona-juego" aria-label="Maze">
+      <canvas id="lienzo" width="176" height="112">Maze of The Great Jelly</canvas>
+    </section>
+  </main>
+
+  <!-- Pantalla de inicio -->
+  <section class="pantalla" id="pantalla-inicio" role="dialog" aria-labelledby="titulo-juego">
+    <div class="tarjeta tarjeta-horizontal">
+      <canvas id="lienzo-inicio" class="mini" width="28" height="24" aria-hidden="true"></canvas>
+      <div class="columna">
+        <h1 class="titulo" id="titulo-juego">The Great Jelly</h1>
+        <p class="instruccion">Use the jellies to move mama jelly and collect her 3 babies</p>
+        <button class="boton boton-grande" id="boton-comenzar" type="button">Start</button>
+        <p class="susurro" id="texto-continuar">or touch any jelly</p>
+        <button class="boton-enlace" id="boton-desde-cero" type="button" hidden>Start from level 1</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pantalla de nivel superado -->
+  <section class="pantalla" id="pantalla-nivel" role="dialog" aria-labelledby="titulo-nivel" hidden>
+    <div class="tarjeta">
+      <h2 id="titulo-nivel">Level complete!</h2>
+      <div class="estrellas" id="estrellas">
+        <canvas width="13" height="13" aria-hidden="true"></canvas>
+        <canvas width="13" height="13" aria-hidden="true"></canvas>
+        <canvas width="13" height="13" aria-hidden="true"></canvas>
+      </div>
+      <p class="instruccion" id="texto-estrellas"></p>
+      <button class="boton boton-grande" id="boton-siguiente" type="button">Next</button>
+      <p class="susurro">or touch any jelly</p>
+    </div>
+  </section>
+
+  <!-- Pantalla final -->
+  <section class="pantalla" id="pantalla-final" role="dialog" aria-labelledby="titulo-final" hidden>
+    <div class="tarjeta">
+      <h2 id="titulo-final">The jelly family is together!</h2>
+      <canvas id="lienzo-final" class="mini" width="64" height="26" aria-hidden="true"></canvas>
+      <p class="instruccion">Thanks for helping mama jelly find her babies.</p>
+      <button class="boton boton-grande" id="boton-volver" type="button">Play again</button>
+      <p class="susurro">or touch any jelly</p>
+    </div>
+  </section>
+
+  <!-- Modo calibración (tecla C) -->
+  <aside class="pantalla" id="panel-calibracion" aria-label="Calibration mode" hidden>
+    <div class="tarjeta tarjeta-horizontal tarjeta-calibracion">
+      <div class="cruz">
+        <div class="flecha" data-code="ArrowUp"><span class="simbolo">⬆</span><span class="nombre">Up</span><span class="contador"></span></div>
+        <div class="flecha" data-code="ArrowLeft"><span class="simbolo">⬅</span><span class="nombre">Left</span><span class="contador"></span></div>
+        <div class="centro">
+          <span>Last arrow</span>
+          <span id="calib-ultima">Waiting…</span>
+          <span id="calib-hace"></span>
+        </div>
+        <div class="flecha" data-code="ArrowRight"><span class="simbolo">➡</span><span class="nombre">Right</span><span class="contador"></span></div>
+        <div class="flecha" data-code="ArrowDown"><span class="simbolo">⬇</span><span class="nombre">Down</span><span class="contador"></span></div>
+      </div>
+      <div class="columna">
+        <h2>Calibration mode</h2>
+        <p class="nota">Touch each jelly once: its arrow should light up and add 1 to "good". The game is paused.</p>
+        <p class="nota">
+          Debounce: <strong id="calib-debounce"></strong>. "Bounces" are double taps the game intentionally ignores;
+          "held" are repeats from resting your hand.
+        </p>
+        <div id="calib-niveles"></div>
+        <div class="fila-botones">
+          <button class="boton boton-crema" id="boton-borrar-progreso" type="button">Clear saved progress</button>
+          <button class="boton" id="boton-cerrar-calibracion" type="button">Close (C)</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <button id="aviso-foco" type="button" hidden><span>Touch here for the jellies to work</span></button>
+ </div>
+
+  <script>
+  'use strict';
+
+  /* ================================================================
+     1. CONFIGURACIÓN GENERAL
+     ================================================================ */
+  const TAM = 16;                    // píxeles de arte por casilla (pixel art 16×16)
+  const DURACION_PASO_MS = 120;      // interpolación visual de una casilla a otra
+  const DEBOUNCE_MS = 130;           // las gelatinas rebotan: ignoramos toques más rápidos que esto
+  const PASO_BEBE_MS = 170;          // un bebé puede dar como mucho un paso cada 170 ms
+  const RETRASO_MAXIMO = 4;          // casillas de retraso antes de que un bebé se canse y espere
+  const LARGO_RASTRO = 64;           // casillas que recuerda el rastro de la madre
+  const ESPERA_INICIO_MS = 400;      // tiempo mínimo en cada pantalla antes de aceptar flechas
+  const ESPERA_NIVEL_MS = 900;       // (evita que el último toque del nivel salte la pantalla de estrellas)
+  const ESPERA_FINAL_MS = 1800;
+  const CLAVE_GUARDADO = 'laGranGelatina.progreso.v1';
+
+  const FLECHAS = {
+    ArrowLeft:  { dx: -1, dy: 0,  nombre: 'Left', simbolo: '⬅' },
+    ArrowRight: { dx: 1,  dy: 0,  nombre: 'Right',   simbolo: '➡' },
+    ArrowUp:    { dx: 0,  dy: -1, nombre: 'Up',    simbolo: '⬆' },
+    ArrowDown:  { dx: 0,  dy: 1,  nombre: 'Down',     simbolo: '⬇' },
+  };
+
+  // Los bebés toman color en el orden en que aparecen en el mapa (leyendo de arriba abajo).
+  const COLORES_BEBES = [
+    { clave: 'limon', nombre: 'lemon' },
+    { clave: 'menta', nombre: 'mint' },
+    { clave: 'uva',   nombre: 'grape' },
+  ];
+
+  /* ================================================================
+     2. NIVELES — edítalos aquí.
+        #  pared        .  suelo        M  mamá gelatina
+        B  bebé (3)     P  portal de salida (también vale S)
+     ================================================================ */
+  const NIVELES = [
+    {
+      nombre: 'First little steps',
+      pista: 'Touch a jelly to walk!',
+      mapa: [
+        '###########',
+        '#.........#',
+        '#.........#',
+        '#M.B.B.B.P#',
+        '#.........#',
+        '#.........#',
+        '###########',
+      ],
+    },
+    {
+      nombre: 'The big room',
+      pista: 'The babies play in the corners',
+      mapa: [
+        '###########',
+        '#B.......B#',
+        '#.........#',
+        '#....M....#',
+        '#.........#',
+        '#B.......P#',
+        '###########',
+      ],
+    },
+    {
+      nombre: 'The columns',
+      pista: 'Go around the walls to find them',
+      mapa: [
+        '#############',
+        '#...........#',
+        '#.M..#...B..#',
+        '#....#......#',
+        '#.B..#...#..#',
+        '#........#.P#',
+        '#....B...#..#',
+        '#############',
+      ],
+    },
+    {
+      nombre: 'The snake corridor',
+      pista: 'Follow the corridor from side to side',
+      mapa: [
+        '#############',
+        '#M.......B..#',
+        '#########...#',
+        '#.B.........#',
+        '#..##########',
+        '#..........P#',
+        '#.....B.....#',
+        '#############',
+      ],
+    },
+    {
+      nombre: 'Up and down',
+      pista: 'Two babies up top and one below',
+      mapa: [
+        '#############',
+        '#B.........B#',
+        '#.####.####.#',
+        '#.....M.....#',
+        '######.######',
+        '#.....B....P#',
+        '#############',
+      ],
+    },
+    {
+      nombre: 'Three rooms',
+      pista: 'Go through the doors of each room',
+      mapa: [
+        '###############',
+        '#.....#.......#',
+        '#.M.......B...#',
+        '#.....#.......#',
+        '###.#####.#####',
+        '#.....#.......#',
+        '#.B.......#.P.#',
+        '#.....#..B#...#',
+        '###############',
+      ],
+    },
+    {
+      nombre: 'Portal in sight',
+      pista: 'The portal is close… but first find all 3 babies!',
+      mapa: [
+        '###############',
+        '#M.P..#.......#',
+        '#.....#..B....#',
+        '#.............#',
+        '##.#######.####',
+        '#.............#',
+        '#.B.........B.#',
+        '###############',
+      ],
+    },
+    {
+      nombre: 'The center portal',
+      pista: 'The portal waits for the whole family',
+      mapa: [
+        '###############',
+        '#B...........B#',
+        '#.###.#####.#.#',
+        '#.#.........#.#',
+        '#.#.##.P.##.#.#',
+        '#...#.....#...#',
+        '###.#.###.#.###',
+        '#M......B.....#',
+        '###############',
+      ],
+    },
+    {
+      nombre: 'Big maze',
+      pista: 'A big maze! Search calmly',
+      mapa: [
+        '#################',
+        '#M......#.......#',
+        '#.#####.#.#####.#',
+        '#.#B..#...#..B#.#',
+        '#.#.#.#####.#.#.#',
+        '#...#.......#...#',
+        '###.###.#.###.###',
+        '#.......#.......#',
+        '#.#####...#####.#',
+        '#.....#.B.#....P#',
+        '#################',
+      ],
+    },
+    {
+      nombre: 'The great adventure',
+      pista: 'Last maze! You can do it',
+      mapa: [
+        '#################',
+        '#.......#......B#',
+        '#.#####.#.#####.#',
+        '#.#B..........#.#',
+        '#.#.###.#.###.#.#',
+        '#.....#.M.#.....#',
+        '###.#.#####.#.###',
+        '#...#.......#...#',
+        '#.#####.#.#####.#',
+        '#.......B......P#',
+        '#################',
+      ],
+    },
+  ];
+
+  /* ================================================================
+     3. SPRITES PEQUEÑOS (pixel art en texto)
+     ================================================================ */
+  const SPRITE_ESTRELLA = [
+    '......#......',
+    '.....#w#.....',
+    '.....#y#.....',
+    '....#yyy#....',
+    '#####yyy#####',
+    '#wyyyyyyyyyy#',
+    '.#yyyyyyyyy#.',
+    '..#yyyyyyy#..',
+    '..#yyyyyyy#..',
+    '.#yyyy#yyyy#.',
+    '.#yy##.##yy#.',
+    '#y##.....##y#',
+    '##.........##',
+  ];
+  const SPRITE_CORAZON = [
+    '.oo.oo.',
+    'owfoffo',
+    'offfffo',
+    '.offfo.',
+    '..ofo..',
+    '...o...',
+  ];
+  const SPRITE_BURBUJA = [
+    '.ooooo.',
+    'owwxwwo',
+    'owwxwwo',
+    'owwxwwo',
+    'owwwwwo',
+    'owwxwwo',
+    '.oowoo.',
+    '...o...',
+  ];
+
+  /* ================================================================
+     4. PALETA (leída de las variables CSS)
+     ================================================================ */
+  let PALETA = {};
+  function leerPaleta() {
+    const estilos = getComputedStyle(document.documentElement);
+    const leer = (nombre) => estilos.getPropertyValue('--' + nombre).trim();
+    PALETA = {
+      crema: leer('crema'),
+      cremaSombra: leer('crema-sombra'),
+      lavanda: leer('lavanda'),
+      lavandaSombra: leer('lavanda-sombra'),
+      fresa: leer('fresa'),
+      limon: leer('limon'),
+      menta: leer('menta'),
+      uva: leer('uva'),
+      contorno: leer('contorno'),
+      blanco: leer('blanco'),
+    };
+  }
+
+  /* ================================================================
+     5. ANÁLISIS Y VALIDACIÓN DE NIVELES
+     ================================================================ */
+  let NIVELES_LISTOS = [];
+
+  function analizarNivel(definicion, indice) {
+    const avisos = [];
+    const filas = definicion.mapa;
+    const alto = filas.length;
+    const ancho = Math.max(...filas.map((fila) => fila.length));
+    const paredes = [];
+    let madre = null;
+    let portal = null;
+    const bebes = [];
+
+    filas.forEach((filaOriginal, y) => {
+      if (filaOriginal.length !== ancho) avisos.push(`row ${y + 1} is too short (padded with wall)`);
+      const fila = filaOriginal.padEnd(ancho, '#');
+      paredes.push([]);
+      for (let x = 0; x < ancho; x++) {
+        const letra = fila[x];
+        paredes[y].push(letra === '#');
+        if (letra === 'M') {
+          if (madre) avisos.push('there is more than one M (using the first)');
+          else madre = { x, y };
+        } else if (letra === 'B') {
+          bebes.push({ x, y });
+        } else if (letra === 'P' || letra === 'S') {
+          if (portal) avisos.push('there is more than one portal (using the first)');
+          else portal = { x, y };
+        } else if (letra !== '#' && letra !== '.') {
+          avisos.push(`unknown letter «${letra}» in row ${y + 1} (treated as floor)`);
+        }
+      }
+    });
+
+    if (!madre) { avisos.push('missing M (mom)'); madre = buscarSuelo(paredes, false); }
+    if (!portal) { avisos.push('missing P (portal)'); portal = buscarSuelo(paredes, true); }
+    if (bebes.length !== 3) avisos.push(`has ${bebes.length} babies (should be 3)`);
+    if (bebes.length > COLORES_BEBES.length) bebes.length = COLORES_BEBES.length;
+
+    const distancias = distanciasDesde(paredes, madre);
+    bebes.forEach((bebe, k) => {
+      if (!isFinite(distancias[bebe.y][bebe.x])) avisos.push(`cannot reach baby ${k + 1}`);
+      if (bebe.x === portal.x && bebe.y === portal.y) avisos.push('a baby is on top of the portal');
+    });
+    if (!isFinite(distancias[portal.y][portal.x])) avisos.push('cannot reach the portal');
+
+    const pasosOptimos = calcularRutaOptima(paredes, madre, bebes, portal);
+
+    return {
+      indice,
+      nombre: definicion.nombre || `Nivel ${indice + 1}`,
+      pista: definicion.pista || '',
+      ancho,
+      alto,
+      paredes,
+      madre,
+      bebes,
+      portal,
+      pasosOptimos,
+      avisos,
+    };
+  }
+
+  function buscarSuelo(paredes, desdeElFinal) {
+    const lista = [];
+    paredes.forEach((fila, y) => fila.forEach((esPared, x) => { if (!esPared) lista.push({ x, y }); }));
+    return (desdeElFinal ? lista[lista.length - 1] : lista[0]) || { x: 1, y: 1 };
+  }
+
+  // Búsqueda en anchura: distancia en pasos desde un punto a cada casilla.
+  function distanciasDesde(paredes, origen) {
+    const alto = paredes.length;
+    const ancho = paredes[0].length;
+    const dist = paredes.map((fila) => fila.map(() => Infinity));
+    const cola = [origen];
+    dist[origen.y][origen.x] = 0;
+    for (let i = 0; i < cola.length; i++) {
+      const { x, y } = cola[i];
+      for (const { dx, dy } of Object.values(FLECHAS)) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= ancho || ny >= alto) continue;
+        if (paredes[ny][nx] || dist[ny][nx] !== Infinity) continue;
+        dist[ny][nx] = dist[y][x] + 1;
+        cola.push({ x: nx, y: ny });
+      }
+    }
+    return dist;
+  }
+
+  function permutaciones(lista) {
+    if (lista.length <= 1) return [lista.slice()];
+    const resultado = [];
+    lista.forEach((elemento, i) => {
+      const resto = lista.slice(0, i).concat(lista.slice(i + 1));
+      permutaciones(resto).forEach((p) => resultado.push([elemento, ...p]));
+    });
+    return resultado;
+  }
+
+  // Ruta más corta: madre → los bebés (en el mejor orden) → portal.
+  function calcularRutaOptima(paredes, madre, bebes, portal) {
+    const puntos = [madre, ...bebes];
+    const tablas = puntos.map((p) => distanciasDesde(paredes, p));
+    let mejor = Infinity;
+    for (const orden of permutaciones(bebes.map((_, k) => k + 1))) {
+      let total = 0;
+      let actual = 0;
+      for (const siguiente of orden) {
+        total += tablas[actual][puntos[siguiente].y][puntos[siguiente].x];
+        actual = siguiente;
+      }
+      total += tablas[actual][portal.y][portal.x];
+      mejor = Math.min(mejor, total);
+    }
+    return isFinite(mejor) ? mejor : 30;
+  }
+
+  function esPared(nivel, x, y) {
+    if (x < 0 || y < 0 || x >= nivel.ancho || y >= nivel.alto) return true;
+    return nivel.paredes[y][x];
+  }
+
+  /* ================================================================
+     6. PROGRESO GUARDADO (localStorage)
+     ================================================================ */
+  const progreso = cargarProgreso();
+
+  function cargarProgreso() {
+    const porDefecto = { nivelActual: 0, estrellas: NIVELES.map(() => 0), musica: true };
+    try {
+      const texto = localStorage.getItem(CLAVE_GUARDADO);
+      if (!texto) return porDefecto;
+      const datos = JSON.parse(texto);
+      const nivelValido = Number.isInteger(datos.nivelActual) && datos.nivelActual >= 0 && datos.nivelActual < NIVELES.length;
+      return {
+        nivelActual: nivelValido ? datos.nivelActual : 0,
+        estrellas: porDefecto.estrellas.map((_, i) => (Array.isArray(datos.estrellas) && Number(datos.estrellas[i])) || 0),
+        musica: datos.musica !== false,
+      };
+    } catch (error) {
+      return porDefecto;
+    }
+  }
+
+  function guardarProgreso() {
+    try {
+      localStorage.setItem(CLAVE_GUARDADO, JSON.stringify(progreso));
+    } catch (error) {
+      // Algunos navegadores bloquean el guardado al abrir con doble clic (file://).
+      // El juego sigue funcionando; solo no recordará el nivel.
+    }
+  }
+
+  /* ================================================================
+     7. REFERENCIAS AL DOCUMENTO
+     ================================================================ */
+  const $ = (id) => document.getElementById(id);
+  const dom = {
+    lienzo: $('lienzo'),
+    zonaJuego: $('zona-juego'),
+    mensaje: $('mensaje'),
+    hudNumero: $('hud-numero'),
+    hudNombre: $('hud-nombre'),
+    hudBebes: $('hud-bebes'),
+    botonReiniciar: $('boton-reiniciar'),
+    botonMusica: $('boton-musica'),
+    pantallaInicio: $('pantalla-inicio'),
+    lienzoInicio: $('lienzo-inicio'),
+    botonComenzar: $('boton-comenzar'),
+    textoContinuar: $('texto-continuar'),
+    botonDesdeCero: $('boton-desde-cero'),
+    pantallaNivel: $('pantalla-nivel'),
+    tituloNivel: $('titulo-nivel'),
+    estrellas: $('estrellas'),
+    textoEstrellas: $('texto-estrellas'),
+    botonSiguiente: $('boton-siguiente'),
+    pantallaFinal: $('pantalla-final'),
+    lienzoFinal: $('lienzo-final'),
+    botonVolver: $('boton-volver'),
+    panelCalibracion: $('panel-calibracion'),
+    calibUltima: $('calib-ultima'),
+    calibHace: $('calib-hace'),
+    calibDebounce: $('calib-debounce'),
+    calibNiveles: $('calib-niveles'),
+    botonBorrarProgreso: $('boton-borrar-progreso'),
+    botonCerrarCalibracion: $('boton-cerrar-calibracion'),
+    avisoFoco: $('aviso-foco'),
+  };
+  const ctx = dom.lienzo.getContext('2d');
+  const mapaLienzo = document.createElement('canvas'); // el laberinto se pinta una vez por nivel aquí
+  const casillasCalibracion = {};
+  document.querySelectorAll('.flecha[data-code]').forEach((el) => { casillasCalibracion[el.dataset.code] = el; });
+
+  /* ================================================================
+     8. ESTADO DEL JUEGO
+     ================================================================ */
+  const juego = {
+    estado: 'inicio',       // 'inicio' | 'jugando' | 'saliendo' | 'nivelCompleto' | 'final'
+    inicioPantalla: 0,      // cuándo se mostró la pantalla actual
+    nivelIndice: 0,
+    nivel: null,
+    madre: null,
+    bebes: [],              // todos los bebés del nivel
+    seguidores: [],         // bebés que siguen a la madre, en orden de fila
+    rastro: [],             // casillas por las que pasó la madre (la más reciente primero)
+    tiempoJugadoMs: 0,      // solo se usa para las estrellas, nunca se muestra
+    cronometroEnMarcha: false,
+    salida: null,           // datos de la animación del portal
+  };
+
+  function crearGelatina(x, y, tipo, colorClave, nombre) {
+    return {
+      x, y,                       // casilla lógica
+      desdeX: x, desdeY: y,       // casilla de origen de la animación
+      progreso: 1,                // 0 → 1 durante la interpolación
+      tipo, colorClave, nombre,
+      estado: tipo === 'madre' ? 'madre' : 'libre', // bebés: 'libre' | 'siguiendo' | 'esperando'
+      fase: Math.random() * Math.PI * 2,
+      mirarX: 0, mirarY: 0,
+      choque: null,               // pequeño rebote contra una pared
+      alegria: 0,                 // saltito de alegría (1 → 0)
+      indiceRastro: -1,           // dónde está en el rastro (-1 = en la casilla de la madre)
+      espera: 0,                  // ms hasta su próximo paso permitido
+      parpadeoHasta: 0,
+      proximoParpadeo: performance.now() + 800 + Math.random() * 3000,
+      salida: null,
+    };
+  }
+
+  function suavizar(t) { return 1 - (1 - t) * (1 - t); }
+
+  function posicionVisual(g) {
+    const k = suavizar(g.progreso);
+    return { x: g.desdeX + (g.x - g.desdeX) * k, y: g.desdeY + (g.y - g.desdeY) * k };
+  }
+
+  function moverGelatina(g, nx, ny) {
+    const actual = posicionVisual(g); // si ya se movía, parte de donde se ve ahora
+    g.desdeX = actual.x;
+    g.desdeY = actual.y;
+    g.x = nx;
+    g.y = ny;
+    g.progreso = 0;
+  }
+
+  function totalBebes() { return juego.bebes.length; }
+
+  /* ================================================================
+     9. FLUJO DE PANTALLAS Y NIVELES
+     ================================================================ */
+  function cambiarEstado(nuevo) {
+    juego.estado = nuevo;
+    juego.inicioPantalla = performance.now();
+    dom.pantallaInicio.hidden = nuevo !== 'inicio';
+    dom.pantallaNivel.hidden = nuevo !== 'nivelCompleto';
+    dom.pantallaFinal.hidden = nuevo !== 'final';
+    soltarFoco();
+  }
+
+  // Quita el foco de los botones para que la barra espaciadora no los pulse por accidente.
+  function soltarFoco() {
+    const activo = document.activeElement;
+    if (activo && activo !== document.body && typeof activo.blur === 'function') activo.blur();
+  }
+
+  function prepararNivel(indice) {
+    const n = NIVELES_LISTOS[indice];
+    juego.nivelIndice = indice;
+    juego.nivel = n;
+    juego.madre = crearGelatina(n.madre.x, n.madre.y, 'madre', 'fresa', 'mom');
+    juego.bebes = n.bebes.map((p, k) => crearGelatina(p.x, p.y, 'bebe', COLORES_BEBES[k].clave, COLORES_BEBES[k].nombre));
+    juego.seguidores = [];
+    juego.rastro = [];
+    juego.tiempoJugadoMs = 0;
+    juego.cronometroEnMarcha = false;
+    juego.salida = null;
+    prerenderizarMapa(n);
+    ajustarLienzo();
+    dom.hudNumero.textContent = `Level ${indice + 1} of ${NIVELES_LISTOS.length}`;
+    dom.hudNombre.textContent = n.nombre;
+    construirHudBebes();
+  }
+
+  function cargarNivel(indice, conPista = true) {
+    prepararNivel(indice);
+    progreso.nivelActual = indice;
+    guardarProgreso();
+    cambiarEstado('jugando');
+    if (conPista && juego.nivel.pista) mostrarMensaje(juego.nivel.pista, 3800);
+  }
+
+  function comenzar(desdeCero) {
+    iniciarAudio();
+    cargarNivel(desdeCero ? 0 : progreso.nivelActual);
+  }
+
+  function reiniciarNivel() {
+    if (juego.estado !== 'jugando') return;
+    sonidoReinicio();
+    cargarNivel(juego.nivelIndice, false);
+    mostrarMensaje('Let\'s start again!', 1800);
+  }
+
+  function siguiente() {
+    if (juego.nivelIndice >= NIVELES_LISTOS.length - 1) mostrarFinal();
+    else cargarNivel(juego.nivelIndice + 1);
+  }
+
+  function volverAJugar() { cargarNivel(0); }
+
+  function actualizarPantallaInicio() {
+    const continuar = progreso.nivelActual > 0;
+    dom.textoContinuar.textContent = continuar
+      ? `We're on level ${progreso.nivelActual + 1}. You can also touch any jelly.`
+      : 'or touch any jelly';
+    dom.botonDesdeCero.hidden = !continuar;
+  }
+
+  /* ================================================================
+     10. MOVIMIENTO, BEBÉS Y PORTAL
+     ================================================================ */
+  function intentarMover(dx, dy) {
+    const madre = juego.madre;
+    madre.mirarX = dx;
+    madre.mirarY = dy;
+    const nx = madre.x + dx;
+    const ny = madre.y + dy;
+
+    if (esPared(juego.nivel, nx, ny)) {
+      madre.choque = { dx, dy, t: 0 }; // rebotito amable, sin castigo
+      sonidoChoque();
+      return;
+    }
+
+    juego.cronometroEnMarcha = true; // el reloj (invisible) empieza con el primer paso
+
+    // La casilla que deja la madre pasa a ser la primera del rastro.
+    juego.rastro.unshift({ x: madre.x, y: madre.y });
+    if (juego.rastro.length > LARGO_RASTRO) juego.rastro.length = LARGO_RASTRO;
+    // Los seguidores no se mueven: su casilla ahora está una posición más atrás en el rastro.
+    juego.seguidores.forEach((bebe) => { bebe.indiceRastro++; });
+
+    moverGelatina(madre, nx, ny);
+    sonidoPaso();
+    avanzarSeguidores();
+    comprobarBebes();
+    comprobarPortal();
+  }
+
+  function posicionEnRastro(indice) {
+    if (indice < 0) return { x: juego.madre.x, y: juego.madre.y };
+    return juego.rastro[Math.min(indice, juego.rastro.length - 1)];
+  }
+
+  // Cada seguidor camina por el rastro hasta su puesto en la fila (0, 1, 2…).
+  function avanzarSeguidores() {
+    juego.seguidores.forEach((bebe, puesto) => {
+      if (bebe.indiceRastro > puesto && bebe.espera <= 0) {
+        bebe.indiceRastro--;
+        const destino = posicionEnRastro(bebe.indiceRastro);
+        bebe.mirarX = Math.sign(destino.x - bebe.x);
+        bebe.mirarY = Math.sign(destino.y - bebe.y);
+        moverGelatina(bebe, destino.x, destino.y);
+        bebe.espera = PASO_BEBE_MS;
+      }
+    });
+    comprobarRezagados();
+  }
+
+  // Si un bebé se queda demasiado atrás, se cansa y espera donde está (no hay castigo).
+  function comprobarRezagados() {
+    for (let puesto = 0; puesto < juego.seguidores.length; puesto++) {
+      const bebe = juego.seguidores[puesto];
+      if (bebe.indiceRastro - puesto > RETRASO_MAXIMO) {
+        const rezagados = juego.seguidores.splice(puesto); // él y los que van detrás
+        rezagados.forEach((r) => { r.estado = 'esperando'; r.indiceRastro = -1; });
+        sonidoRezagado();
+        mostrarMensaje(rezagados.length === 1
+          ? 'A baby got tired! Go back to find it'
+          : 'Some babies got tired! Go back to find them');
+        actualizarHudBebes();
+        return;
+      }
+    }
+  }
+
+  function comprobarBebes() {
+    const madre = juego.madre;
+    for (const bebe of juego.bebes) {
+      if (bebe.estado === 'siguiendo') continue;
+      if (bebe.x !== madre.x || bebe.y !== madre.y) continue;
+      bebe.estado = 'siguiendo';
+      bebe.indiceRastro = -1;
+      bebe.espera = PASO_BEBE_MS;
+      bebe.alegria = 1;
+      madre.alegria = 1;
+      juego.seguidores.push(bebe);
+      sonidoRecoger(juego.seguidores.length);
+      const faltan = totalBebes() - juego.seguidores.length;
+      if (faltan === 0) mostrarMensaje('All here! Now go to the portal');
+      else if (faltan === 1) mostrarMensaje(`Baby ${bebe.nombre}! 1 left`);
+      else mostrarMensaje(`Baby ${bebe.nombre}! ${faltan} left`);
+      actualizarHudBebes();
+    }
+  }
+
+  function comprobarPortal() {
+    const { portal } = juego.nivel;
+    const madre = juego.madre;
+    if (madre.x !== portal.x || madre.y !== portal.y) return;
+    const faltan = totalBebes() - juego.seguidores.length;
+    if (faltan <= 0) {
+      iniciarSalida();
+    } else {
+      sonidoPortalCerrado();
+      mostrarMensaje(faltan === 1
+        ? 'The portal waits for the whole family: 1 baby left'
+        : `The portal waits for the whole family: ${faltan} babies left`);
+    }
+  }
+
+  /* ---------- Animación de salida por el portal ---------- */
+  const SALIDA_ESCALON_MS = 200;  // los bebés entran uno a uno y mamá la última
+  const SALIDA_DESLIZ_MS = 220;   // saltito hasta el portal
+  const SALIDA_ESTIRA_MS = 520;   // se estira y desaparece
+
+  function iniciarSalida() {
+    const orden = [...juego.seguidores, juego.madre];
+    orden.forEach((g, i) => {
+      const v = posicionVisual(g);
+      g.salida = { desdeX: v.x, desdeY: v.y, retraso: i * SALIDA_ESCALON_MS };
+    });
+    juego.salida = {
+      t: 0,
+      duracion: (orden.length - 1) * SALIDA_ESCALON_MS + SALIDA_DESLIZ_MS + SALIDA_ESTIRA_MS + 350,
+    };
+    cambiarEstado('saliendo');
+    sonidoPortal();
+  }
+
+  function calcularEstrellas(segundos, pasosOptimos) {
+    // Muy generoso: un niño de 7 años necesita aproximadamente 1 s por paso.
+    if (segundos <= pasosOptimos * 1.0 + 10) return 3;
+    if (segundos <= pasosOptimos * 2.0 + 20) return 2;
+    return 1;
+  }
+
+  function completarNivel() {
+    const indice = juego.nivelIndice;
+    const estrellas = calcularEstrellas(juego.tiempoJugadoMs / 1000, juego.nivel.pasosOptimos);
+    progreso.estrellas[indice] = Math.max(progreso.estrellas[indice] || 0, estrellas);
+    progreso.nivelActual = (indice + 1) % NIVELES_LISTOS.length; // tras el 10, el siguiente niño empieza en el 1
+    guardarProgreso();
+    mostrarPantallaNivel(estrellas);
+  }
+
+  function mostrarPantallaNivel(estrellas) {
+    const esUltimo = juego.nivelIndice === NIVELES_LISTOS.length - 1;
+    dom.tituloNivel.textContent = esUltimo ? 'Last level complete!' : `Level ${juego.nivelIndice + 1} complete!`;
+    dom.textoEstrellas.textContent = [
+      '',
+      'You did it! The family is safe.',
+      'Great job! What a brave jelly.',
+      'Amazing! Three stars!',
+    ][estrellas];
+    const lienzos = dom.estrellas.querySelectorAll('canvas');
+    lienzos.forEach((lienzo, i) => {
+      dibujarEstrella(lienzo, i < estrellas);
+      lienzo.classList.remove('aparece');
+      void lienzo.offsetWidth; // reinicia la animación CSS
+      lienzo.style.animationDelay = `${0.25 + i * 0.25}s`;
+      lienzo.classList.add('aparece');
+    });
+    sonidoNivelCompleto(estrellas);
+    cambiarEstado('nivelCompleto');
+  }
+
+  function mostrarFinal() {
+    cambiarEstado('final');
+    sonidoFinal();
+  }
+
+  /* ================================================================
+     11. ACTUALIZACIÓN POR FOTOGRAMA
+     ================================================================ */
+  function actualizar(dt, ahora) {
+    const todas = juego.madre ? [juego.madre, ...juego.bebes] : [];
+    for (const g of todas) {
+      if (g.progreso < 1) g.progreso = Math.min(1, g.progreso + dt / DURACION_PASO_MS);
+      if (g.choque) { g.choque.t += dt; if (g.choque.t >= 180) g.choque = null; }
+      if (g.alegria > 0) g.alegria = Math.max(0, g.alegria - dt / 450);
+      if (g.espera > 0) g.espera -= dt;
+      if (ahora > g.proximoParpadeo) {
+        g.parpadeoHasta = ahora + 130;
+        g.proximoParpadeo = ahora + 2200 + Math.random() * 3000;
+      }
+    }
+
+    if (juego.estado === 'jugando') {
+      if (juego.cronometroEnMarcha && !calibracion.abierta) juego.tiempoJugadoMs += dt;
+      avanzarSeguidores(); // los bebés rezagados se ponen al día poco a poco
+    }
+
+    if (juego.estado === 'saliendo') {
+      juego.salida.t += dt;
+      if (juego.salida.t >= juego.salida.duracion) completarNivel();
+    }
+  }
+
+  /* ================================================================
+     12. DIBUJO — PIXEL ART POR CÓDIGO
+     ================================================================ */
+  function dibujarSprite(c, filas, x, y, colores, alpha = 1) {
+    c.save();
+    c.globalAlpha = alpha;
+    for (let fy = 0; fy < filas.length; fy++) {
+      for (let fx = 0; fx < filas[fy].length; fx++) {
+        const color = colores[filas[fy][fx]];
+        if (!color) continue;
+        c.fillStyle = color;
+        c.fillRect(x + fx, y + fy, 1, 1);
+      }
+    }
+    c.restore();
+  }
+
+  // Perfil de la gelatina: cuántos píxeles se mete cada fila desde el borde (forma de cúpula).
+  const PERFIL_CUPULA = [3, 2, 1, 1];
+  function margenFila(fila, alto) {
+    let margen = fila < PERFIL_CUPULA.length ? PERFIL_CUPULA[fila] : 0;
+    if (fila === alto - 1) margen = Math.max(margen, 1); // base apenas redondeada
+    return margen;
+  }
+
+  /**
+   * Dibuja una gelatina: rectángulo redondeado, contorno grueso, brillo arriba a la izquierda y carita.
+   * g = { cx, base, ancho, alto, color, esMadre, mirarX, mirarY, parpadeo, alpha }
+   */
+  function dibujarGelatina(c, g) {
+    const ancho = Math.max(2, g.ancho);
+    const alto = Math.max(2, g.alto);
+    const izquierda = g.cx - Math.floor(ancho / 2);
+    const arriba = g.base - alto + 1;
+    const alpha = g.alpha === undefined ? 1 : g.alpha;
+    const mitad = Math.floor(ancho / 2);
+    const margenMaximo = Math.max(0, mitad - 1);
+    const margenInterior = (f) => Math.max(margenFila(f - 1, alto), margenFila(f, alto), margenFila(f + 1, alto)) + 1;
+
+    c.save();
+    c.globalAlpha = alpha;
+
+    // Silueta completa en color de contorno…
+    c.fillStyle = PALETA.contorno;
+    for (let f = 0; f < alto; f++) {
+      const m = Math.min(margenFila(f, alto), margenMaximo);
+      c.fillRect(izquierda + m, arriba + f, ancho - 2 * m, 1);
+    }
+    // …y el relleno encima, un píxel hacia dentro (así el contorno queda grueso y continuo).
+    c.fillStyle = g.color;
+    for (let f = 1; f < alto - 1; f++) {
+      const m = margenInterior(f);
+      if (ancho - 2 * m > 0) c.fillRect(izquierda + m, arriba + f, ancho - 2 * m, 1);
+    }
+    // Sombra suave en la parte de abajo.
+    c.globalAlpha = alpha * 0.22;
+    c.fillStyle = PALETA.contorno;
+    for (let f = Math.max(1, alto - 3); f < alto - 1; f++) {
+      const m = margenInterior(f);
+      if (ancho - 2 * m > 0) c.fillRect(izquierda + m, arriba + f, ancho - 2 * m, 1);
+    }
+    c.globalAlpha = alpha;
+
+    if (ancho >= 8 && alto >= 6) {
+      // Brillo blanco arriba a la izquierda.
+      c.fillStyle = PALETA.blanco;
+      c.fillRect(izquierda + 3, arriba + 2, 2, 1);
+      if (g.esMadre) c.fillRect(izquierda + 3, arriba + 3, 1, 1);
+
+      // Carita: ojos que miran hacia donde se mueve, boca y mofletes.
+      const separacion = g.esMadre ? 2 : 1;
+      const mx = g.mirarX || 0;
+      const my = g.mirarY || 0;
+      const ojoY = arriba + Math.round(alto * 0.42) + my;
+      const ojoIzq = izquierda + mitad - 1 - separacion;
+      const ojoDer = izquierda + mitad + separacion;
+      c.fillStyle = PALETA.contorno;
+      if (g.parpadeo) {
+        c.fillRect(ojoIzq + mx, ojoY + 1, 1, 1);
+        c.fillRect(ojoDer + mx, ojoY + 1, 1, 1);
+      } else {
+        c.fillRect(ojoIzq + mx, ojoY, 1, 2);
+        c.fillRect(ojoDer + mx, ojoY, 1, 2);
+      }
+      c.fillRect(izquierda + mitad - 1 + mx, ojoY + (g.esMadre ? 3 : 2), 2, 1);
+      c.globalAlpha = alpha * 0.6;
+      c.fillStyle = g.esMadre ? PALETA.blanco : PALETA.fresa;
+      c.fillRect(ojoIzq - 1, ojoY + 2, 1, 1);
+      c.fillRect(ojoDer + 1, ojoY + 2, 1, 1);
+      c.globalAlpha = alpha;
+    }
+
+    // Mamá lleva dos hojitas de fresa en la cabeza.
+    if (g.esMadre && alto >= 6 && ancho >= 8) {
+      const centro = izquierda + mitad;
+      c.fillStyle = PALETA.contorno;
+      c.fillRect(centro - 1, arriba - 3, 2, 1);
+      c.fillRect(centro - 2, arriba - 2, 1, 1);
+      c.fillRect(centro + 1, arriba - 2, 1, 1);
+      c.fillRect(centro - 3, arriba - 1, 1, 1);
+      c.fillRect(centro + 2, arriba - 1, 1, 1);
+      c.fillStyle = PALETA.menta;
+      c.fillRect(centro - 1, arriba - 2, 2, 1);
+      c.fillRect(centro - 2, arriba - 1, 4, 1);
+    }
+    c.restore();
+  }
+
+  /* ---------- Mapa (se pinta una sola vez por nivel) ---------- */
+  function prerenderizarMapa(n) {
+    mapaLienzo.width = n.ancho * TAM;
+    mapaLienzo.height = n.alto * TAM;
+    const c = mapaLienzo.getContext('2d');
+    c.imageSmoothingEnabled = false;
+    for (let y = 0; y < n.alto; y++) {
+      for (let x = 0; x < n.ancho; x++) {
+        if (esPared(n, x, y)) dibujarPared(c, n, x, y);
+        else dibujarSuelo(c, n, x, y);
+      }
+    }
+  }
+
+  function dibujarSuelo(c, n, x, y) {
+    const px = x * TAM;
+    const py = y * TAM;
+    c.fillStyle = PALETA.crema;
+    c.fillRect(px, py, TAM, TAM);
+    c.fillStyle = PALETA.cremaSombra;
+    if ((x + y) % 2 === 0) {
+      c.fillRect(px + 3, py + 4, 1, 1);
+      c.fillRect(px + 11, py + 11, 2, 1);
+    } else {
+      c.fillRect(px + 9, py + 5, 1, 1);
+      c.fillRect(px + 4, py + 12, 1, 1);
+    }
+    if (esPared(n, x, y - 1)) c.fillRect(px, py, TAM, 3); // sombra de la pared de arriba
+    if (esPared(n, x - 1, y)) c.fillRect(px, py, 2, TAM); // y de la de la izquierda
+  }
+
+  function dibujarPared(c, n, x, y) {
+    const px = x * TAM;
+    const py = y * TAM;
+    const sueloArriba = !esPared(n, x, y - 1);
+    const sueloAbajo = !esPared(n, x, y + 1);
+    const sueloIzq = !esPared(n, x - 1, y);
+    const sueloDer = !esPared(n, x + 1, y);
+
+    c.fillStyle = PALETA.lavanda;
+    c.fillRect(px, py, TAM, TAM);
+    // ladrillos suaves
+    c.fillStyle = PALETA.lavandaSombra;
+    c.globalAlpha = 0.45;
+    c.fillRect(px, py + 7, TAM, 1);
+    c.fillRect(px + (y % 2 ? 4 : 11), py, 1, 7);
+    c.fillRect(px + (y % 2 ? 11 : 4), py + 8, 1, 7);
+    c.globalAlpha = 1;
+    // borde de arriba iluminado
+    if (sueloArriba) {
+      c.fillStyle = PALETA.blanco;
+      c.globalAlpha = 0.5;
+      c.fillRect(px, py + 1, TAM, 2);
+      c.globalAlpha = 1;
+    }
+    // cara frontal (da volumen cuando hay suelo debajo)
+    if (sueloAbajo) {
+      c.fillStyle = PALETA.lavandaSombra;
+      c.fillRect(px, py + 11, TAM, 5);
+    }
+    // contorno grueso donde la pared toca el suelo
+    c.fillStyle = PALETA.contorno;
+    if (sueloArriba) c.fillRect(px, py, TAM, 1);
+    if (sueloAbajo) c.fillRect(px, py + 15, TAM, 1);
+    if (sueloIzq) c.fillRect(px, py, 1, TAM);
+    if (sueloDer) c.fillRect(px + 15, py, 1, TAM);
+  }
+
+  /* ---------- Portal ---------- */
+  const PIXELES_PORTAL = (() => {
+    const lista = [];
+    for (let y = 0; y < TAM; y++) {
+      for (let x = 0; x < TAM; x++) {
+        const dx = x - 7.5;
+        const dy = y - 7.5;
+        const d = Math.hypot(dx, dy);
+        let zona = null;
+        if (d < 7.4 && d >= 6.3) zona = 'borde';
+        else if (d < 6.3 && d >= 4.2) zona = 'anillo';
+        else if (d < 4.2) zona = 'centro';
+        if (zona) lista.push({ x, y, d, angulo: Math.atan2(dy, dx), zona });
+      }
+    }
+    return lista;
+  })();
+
+  function dibujarPortal(c, ahora) {
+    const { portal } = juego.nivel;
+    const px = portal.x * TAM;
+    const py = portal.y * TAM;
+    const abierto = juego.estado === 'saliendo' || juego.seguidores.length >= totalBebes();
+    const coloresArcoiris = [PALETA.fresa, PALETA.limon, PALETA.menta, PALETA.uva, PALETA.blanco];
+
+    for (const p of PIXELES_PORTAL) {
+      let color;
+      if (p.zona === 'borde') {
+        color = PALETA.contorno;
+      } else if (p.zona === 'anillo') {
+        const sector = Math.floor(((p.angulo + Math.PI) / (2 * Math.PI)) * 10 + (abierto ? ahora * 0.008 : 0));
+        color = abierto ? coloresArcoiris[((sector % 5) + 5) % 5] : (sector % 2 ? PALETA.lavanda : PALETA.lavandaSombra);
+      } else {
+        const onda = (((p.d - ahora * 0.006) % 2) + 2) % 2;
+        color = abierto ? (onda < 1 ? PALETA.blanco : PALETA.lavanda) : PALETA.cremaSombra;
+      }
+      c.fillStyle = color;
+      c.fillRect(px + p.x, py + p.y, 1, 1);
+    }
+
+    // Portal cerrado: una lucecita por bebé que se enciende con su color al recogerlo.
+    if (!abierto) {
+      juego.bebes.forEach((bebe, k) => {
+        c.fillStyle = bebe.estado === 'siguiendo' ? PALETA[bebe.colorClave] : PALETA.lavandaSombra;
+        c.fillRect(px + 4 + k * 3, py + 7, 2, 2);
+      });
+    }
+  }
+
+  /* ---------- Parámetros de dibujo de cada gelatina (animaciones) ---------- */
+  function parametrosDibujo(g, ahora) {
+    const esMadre = g.tipo === 'madre';
+    const pos = posicionVisual(g);
+    let posX = pos.x;
+    let posY = pos.y;
+    let ancho = esMadre ? 14 : 10;
+    let alto = esMadre ? 12 : 9;
+    let desplX = 0;
+    let desplY = 0;
+    let escalaX = 1;
+    let escalaY = 1;
+    let alpha = 1;
+    let visible = true;
+
+    if (g.progreso < 1) {
+      // Se aplasta mientras se desliza a la siguiente casilla.
+      const s = Math.round(Math.sin(g.progreso * Math.PI));
+      ancho += 2 * s;
+      alto -= 2 * s;
+    } else {
+      // Rebote suave en reposo.
+      alto += Math.round(Math.sin(ahora * 0.005 + g.fase) * 0.9);
+    }
+
+    if (g.estado === 'libre') desplY -= Math.round(Math.max(0, Math.sin(ahora * 0.004 + g.fase)) * 2);
+    if (g.alegria > 0) desplY -= Math.round(Math.sin((1 - g.alegria) * Math.PI) * 4);
+
+    if (g.choque) {
+      const k = Math.sin((g.choque.t / 180) * Math.PI);
+      desplX += Math.round(g.choque.dx * k * 2);
+      desplY += Math.round(g.choque.dy * k * 2);
+      if (g.choque.dx) { ancho -= 2 * Math.round(k); alto += Math.round(k); }
+      else { alto -= Math.round(k * 2); ancho += 2 * Math.round(k); }
+    }
+
+    // Animación del portal: saltito hasta el portal, se estira hacia arriba y desaparece.
+    if (juego.estado === 'saliendo' && g.salida) {
+      const t = juego.salida.t - g.salida.retraso;
+      const { portal } = juego.nivel;
+      if (t <= 0) {
+        posX = g.salida.desdeX;
+        posY = g.salida.desdeY;
+      } else if (t < SALIDA_DESLIZ_MS) {
+        const k = t / SALIDA_DESLIZ_MS;
+        posX = g.salida.desdeX + (portal.x - g.salida.desdeX) * k;
+        posY = g.salida.desdeY + (portal.y - g.salida.desdeY) * k;
+        desplY -= Math.round(Math.sin(k * Math.PI) * 5);
+      } else {
+        const q = Math.min(1, (t - SALIDA_DESLIZ_MS) / SALIDA_ESTIRA_MS);
+        posX = portal.x;
+        posY = portal.y;
+        escalaX = 1 - 0.85 * q;
+        escalaY = 1 + 1.3 * q;
+        desplY -= Math.round(q * 8);
+        alpha = 1 - q * q;
+        if (q >= 1) visible = false;
+      }
+    }
+
+    return {
+      visible,
+      ordenY: posY,
+      sueloY: Math.round(posY * TAM + 14),
+      cx: Math.round(posX * TAM + 8 + desplX),
+      base: Math.round(posY * TAM + 14 + desplY),
+      ancho: Math.max(2, 2 * Math.round((ancho * escalaX) / 2)),
+      alto: Math.max(2, Math.round(alto * escalaY)),
+      color: PALETA[g.colorClave],
+      esMadre,
+      mirarX: g.mirarX,
+      mirarY: g.mirarY,
+      parpadeo: ahora < g.parpadeoHasta,
+      alpha,
+    };
+  }
+
+  function dibujarJuego(ahora) {
+    const n = juego.nivel;
+    if (!n) return;
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, dom.lienzo.width, dom.lienzo.height);
+    ctx.drawImage(mapaLienzo, 0, 0);
+    dibujarPortal(ctx, ahora);
+
+    // Orden de dibujo: lo que está más abajo se pinta encima; mamá siempre por encima en empate.
+    const lista = [...juego.bebes, juego.madre]
+      .map((g) => ({ g, p: parametrosDibujo(g, ahora) }))
+      .filter((item) => item.p.visible)
+      .sort((a, b) => (a.p.ordenY - b.p.ordenY) || ((a.g.tipo === 'madre') - (b.g.tipo === 'madre')));
+
+    // Sombras en el suelo
+    ctx.fillStyle = PALETA.contorno;
+    for (const { p } of lista) {
+      ctx.globalAlpha = 0.15 * p.alpha;
+      ctx.fillRect(p.cx - Math.floor(p.ancho / 2) + 2, p.sueloY + 1, Math.max(0, p.ancho - 4), 1);
+    }
+    ctx.globalAlpha = 1;
+
+    for (const { p } of lista) dibujarGelatina(ctx, p);
+
+    // Corazones de los bebés que esperan ser encontrados y globo «!» de los cansados.
+    for (const { g, p } of lista) {
+      const cabeza = p.base - p.alto;
+      if (g.estado === 'libre') {
+        const ciclo = ((ahora / 1000 + g.fase) % 2.6);
+        if (ciclo < 1) {
+          dibujarSprite(ctx, SPRITE_CORAZON, p.cx - 3, cabeza - 6 - Math.floor(ciclo * 4),
+            { o: PALETA.contorno, f: PALETA.fresa, w: PALETA.blanco }, 1 - ciclo * 0.6);
+        }
+      } else if (g.estado === 'esperando') {
+        const flotar = Math.round(Math.sin(ahora * 0.006 + g.fase));
+        dibujarSprite(ctx, SPRITE_BURBUJA, p.cx - 3, cabeza - 9 + flotar,
+          { o: PALETA.contorno, w: PALETA.blanco, x: PALETA.fresa });
+      }
+    }
+  }
+
+  /* ---------- Escenas pequeñas de las pantallas ---------- */
+  function dibujarInicio(ahora) {
+    const c = dom.lienzoInicio.getContext('2d');
+    c.imageSmoothingEnabled = false;
+    c.clearRect(0, 0, 28, 24);
+    const salto = Math.max(0, Math.sin(ahora * 0.004));
+    const altura = Math.round(salto * salto * 4);
+    const enSuelo = salto < 0.12;
+    c.fillStyle = PALETA.contorno;
+    c.globalAlpha = 0.18;
+    c.fillRect(9, 21, 10, 1);
+    c.globalAlpha = 1;
+    dibujarGelatina(c, {
+      cx: 14,
+      base: 20 - altura,
+      ancho: enSuelo ? 16 : 14,
+      alto: (enSuelo ? 10 : 12) + Math.round(Math.sin(ahora * 0.008) * 0.6),
+      color: PALETA.fresa,
+      esMadre: true,
+      mirarX: [0, 1, 0, -1][Math.floor(ahora / 1400) % 4],
+      parpadeo: (ahora % 3200) < 140,
+    });
+  }
+
+  function dibujarFinal(ahora) {
+    const c = dom.lienzoFinal.getContext('2d');
+    c.imageSmoothingEnabled = false;
+    c.clearRect(0, 0, 64, 26);
+    const familia = [
+      { cx: 13, color: PALETA.fresa, esMadre: true, ancho: 14, alto: 12 },
+      { cx: 30, color: PALETA.limon, ancho: 10, alto: 9 },
+      { cx: 42, color: PALETA.menta, ancho: 10, alto: 9 },
+      { cx: 54, color: PALETA.uva, ancho: 10, alto: 9 },
+    ];
+    familia.forEach((miembro, i) => {
+      const s = Math.max(0, Math.sin(ahora * 0.005 - i * 0.9));
+      const altura = Math.round(s * s * 5);
+      c.fillStyle = PALETA.contorno;
+      c.globalAlpha = 0.18;
+      c.fillRect(miembro.cx - miembro.ancho / 2 + 2, 24, miembro.ancho - 4, 1);
+      c.globalAlpha = 1;
+      dibujarGelatina(c, {
+        cx: miembro.cx,
+        base: 23 - altura,
+        ancho: miembro.ancho,
+        alto: miembro.alto,
+        color: miembro.color,
+        esMadre: miembro.esMadre,
+        mirarX: miembro.esMadre ? 1 : -1,
+        parpadeo: ((ahora + i * 700) % 3000) < 140,
+      });
+      if (altura >= 4) {
+        dibujarSprite(c, SPRITE_CORAZON, miembro.cx - 3, 23 - altura - miembro.alto - 7,
+          { o: PALETA.contorno, f: PALETA.fresa, w: PALETA.blanco });
+      }
+    });
+  }
+
+  function dibujarEstrella(lienzo, llena) {
+    const c = lienzo.getContext('2d');
+    c.imageSmoothingEnabled = false;
+    c.clearRect(0, 0, 13, 13);
+    const colores = llena
+      ? { '#': PALETA.contorno, y: PALETA.limon, w: PALETA.blanco }
+      : { '#': PALETA.lavandaSombra, y: PALETA.cremaSombra, w: PALETA.crema };
+    dibujarSprite(c, SPRITE_ESTRELLA, 0, 0, colores);
+  }
+
+  /* ---------- Escenario 15:8: se escala entero para caber sin scroll ---------- */
+  const ANCHO_ESCENARIO = 1500;
+  const ALTO_ESCENARIO = 800;
+
+  function ajustarEscenario() {
+    const escala = Math.min(window.innerWidth / ANCHO_ESCENARIO, window.innerHeight / ALTO_ESCENARIO);
+    if (isFinite(escala) && escala > 0) document.documentElement.style.setProperty('--escala', String(escala));
+  }
+
+  /* ---------- Tamaño del laberinto dentro de su zona del escenario ----------
+     Se mide en píxeles del escenario (1500×800); el escalado final lo hace ajustarEscenario(). */
+  function ajustarLienzo() {
+    const n = juego.nivel;
+    if (!n) return;
+    const anchoArte = n.ancho * TAM;
+    const altoArte = n.alto * TAM;
+    if (dom.lienzo.width !== anchoArte) dom.lienzo.width = anchoArte;
+    if (dom.lienzo.height !== altoArte) dom.lienzo.height = altoArte;
+
+    const estilo = getComputedStyle(dom.zonaJuego);
+    const disponibleX = dom.zonaJuego.clientWidth - parseFloat(estilo.paddingLeft) - parseFloat(estilo.paddingRight) - 12;
+    const disponibleY = dom.zonaJuego.clientHeight - parseFloat(estilo.paddingTop) - parseFloat(estilo.paddingBottom) - 22;
+    let escala = Math.min(disponibleX / anchoArte, disponibleY / altoArte);
+    if (!isFinite(escala) || escala <= 0) escala = 1;
+    escala = Math.max(0.5, escala);
+    dom.lienzo.style.width = `${Math.floor(anchoArte * escala)}px`;
+    dom.lienzo.style.height = `${Math.floor(altoArte * escala)}px`;
+  }
+
+  /* ================================================================
+     13. INTERFAZ (HUD, mensajes, botones)
+     ================================================================ */
+  function construirHudBebes() {
+    dom.hudBebes.innerHTML = '';
+    juego.bebes.forEach((bebe) => {
+      const marca = document.createElement('span');
+      marca.className = 'bebe-hud';
+      marca.style.setProperty('--color-bebe', `var(--${bebe.colorClave})`);
+      marca.setAttribute('aria-label', `Baby ${bebe.nombre}`);
+      dom.hudBebes.appendChild(marca);
+    });
+    actualizarHudBebes();
+  }
+
+  function actualizarHudBebes() {
+    const marcas = dom.hudBebes.children;
+    juego.bebes.forEach((bebe, i) => {
+      if (marcas[i]) marcas[i].classList.toggle('recogido', bebe.estado === 'siguiendo');
+    });
+  }
+
+  let temporizadorMensaje = null;
+  function mostrarMensaje(texto, duracion = 2600) {
+    dom.mensaje.textContent = texto;
+    dom.mensaje.classList.add('visible');
+    clearTimeout(temporizadorMensaje);
+    temporizadorMensaje = setTimeout(() => dom.mensaje.classList.remove('visible'), duracion);
+  }
+
+  function actualizarBotonMusica() {
+    dom.botonMusica.textContent = progreso.musica ? '♪ Music' : '♪ No music';
+    dom.botonMusica.setAttribute('aria-pressed', String(progreso.musica));
+  }
+
+  function alternarMusica() {
+    progreso.musica = !progreso.musica;
+    guardarProgreso();
+    actualizarBotonMusica();
+    if (audio) audio.musica.gain.setTargetAtTime(progreso.musica ? 1 : 0, audio.ctx.currentTime, 0.05);
+  }
+
+  function alternarPantallaCompleta() {
+    const raiz = document.documentElement;
+    if (!document.fullscreenElement) {
+      if (raiz.requestFullscreen) raiz.requestFullscreen().catch(() => {});
+    } else if (document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    }
+  }
+
+  /* ================================================================
+     14. CALIBRACIÓN (tecla C)
+     ================================================================ */
+  const calibracion = { abierta: false, ultimaFlecha: null, ultimaHora: 0, contadores: {} };
+  Object.keys(FLECHAS).forEach((codigo) => {
+    calibracion.contadores[codigo] = { aceptadas: 0, rebotes: 0, mantenidas: 0 };
+  });
+
+  function alternarCalibracion() {
+    calibracion.abierta = !calibracion.abierta;
+    dom.panelCalibracion.hidden = !calibracion.abierta;
+    refrescarContadores();
+    soltarFoco();
+  }
+
+  function registrarCalibracion(codigo, tipo) {
+    calibracion.contadores[codigo][tipo]++;
+    if (tipo === 'aceptadas') {
+      calibracion.ultimaFlecha = codigo;
+      calibracion.ultimaHora = performance.now();
+      const casilla = casillasCalibracion[codigo];
+      if (casilla) {
+        casilla.classList.remove('destello');
+        void casilla.offsetWidth;
+        casilla.classList.add('destello');
+      }
+    }
+    if (calibracion.abierta) refrescarContadores();
+  }
+
+  function refrescarContadores() {
+    Object.entries(casillasCalibracion).forEach(([codigo, casilla]) => {
+      const cuenta = calibracion.contadores[codigo];
+      const etiqueta = casilla.querySelector('.contador');
+      if (etiqueta) etiqueta.textContent = `good ${cuenta.aceptadas} · bounces ${cuenta.rebotes} · held ${cuenta.mantenidas}`;
+    });
+  }
+
+  function marcarFlechaPulsada(codigo, pulsada) {
+    const casilla = casillasCalibracion[codigo];
+    if (casilla) casilla.classList.toggle('pulsada', pulsada);
+  }
+
+  function actualizarPanelCalibracion(ahora) {
+    const codigo = calibracion.ultimaFlecha;
+    if (!codigo) {
+      dom.calibUltima.textContent = 'Waiting…';
+      dom.calibHace.textContent = '';
+      return;
+    }
+    dom.calibUltima.textContent = `${FLECHAS[codigo].simbolo} ${FLECHAS[codigo].nombre}`;
+    dom.calibHace.textContent = `${codigo}, ${((ahora - calibracion.ultimaHora) / 1000).toFixed(1)} s ago`;
+  }
+
+  function informeDeNiveles() {
+    const problemas = NIVELES_LISTOS
+      .filter((n) => n.avisos.length)
+      .map((n) => `Level ${n.indice + 1}: ${n.avisos.join('; ')}`);
+    const pasos = NIVELES_LISTOS.map((n) => n.pasosOptimos).join(', ');
+    dom.calibNiveles.textContent = problemas.length
+      ? `Check levels:\n${problemas.join('\n')}`
+      : `All ${NIVELES_LISTOS.length} levels are OK.\nMinimum steps per level: ${pasos}`;
+    if (problemas.length) console.warn('[La Gran Gelatina] Problemas en los niveles:\n' + problemas.join('\n'));
+  }
+
+  /* ================================================================
+     15. ENTRADA: teclado / Makey Makey
+     ================================================================ */
+  const ultimaAceptada = {}; // momento de la última pulsación válida de cada flecha
+  const ultimaSoltada = {};  // momento en que se soltó cada flecha por última vez
+
+  function alPulsarTecla(evento) {
+    const codigo = evento.code;
+    const flecha = FLECHAS[codigo];
+    if (flecha || codigo === 'Space') evento.preventDefault(); // que la página no haga scroll
+    iniciarAudio(); // los navegadores solo permiten sonido tras una acción del usuario
+
+    if (flecha) {
+      // Mano apoyada sobre la gelatina: el sistema repite la tecla. Se ignora.
+      if (evento.repeat) { registrarCalibracion(codigo, 'mantenidas'); return; }
+
+      const ahora = performance.now();
+      const desdeUltima = ahora - (ultimaAceptada[codigo] ?? -Infinity);
+      const desdeSoltada = ahora - (ultimaSoltada[codigo] ?? -Infinity);
+      marcarFlechaPulsada(codigo, true);
+
+      // Debounce: la gelatina blanda puede abrir y cerrar el circuito varias veces en un solo toque.
+      if (desdeUltima < DEBOUNCE_MS || desdeSoltada < DEBOUNCE_MS) {
+        registrarCalibracion(codigo, 'rebotes');
+        return;
+      }
+
+      ultimaAceptada[codigo] = ahora;
+      registrarCalibracion(codigo, 'aceptadas');
+      if (!calibracion.abierta) manejarFlecha(flecha, ahora);
+      return;
+    }
+
+    if (evento.repeat) return;
+    switch (codigo) {
+      case 'KeyC': alternarCalibracion(); break;
+      case 'KeyR': reiniciarNivel(); break;
+      case 'KeyM': alternarMusica(); break;
+      case 'KeyF': alternarPantallaCompleta(); break;
+      default: break;
+    }
+  }
+
+  function alSoltarTecla(evento) {
+    if (!FLECHAS[evento.code]) return;
+    ultimaSoltada[evento.code] = performance.now();
+    marcarFlechaPulsada(evento.code, false);
+  }
+
+  // Qué hace una flecha según la pantalla en la que estemos.
+  function manejarFlecha(flecha, ahora) {
+    const tiempoEnPantalla = ahora - juego.inicioPantalla;
+    switch (juego.estado) {
+      case 'inicio':
+        if (tiempoEnPantalla > ESPERA_INICIO_MS) comenzar(false);
+        break;
+      case 'jugando':
+        intentarMover(flecha.dx, flecha.dy);
+        break;
+      case 'nivelCompleto':
+        if (tiempoEnPantalla > ESPERA_NIVEL_MS) siguiente();
+        break;
+      case 'final':
+        if (tiempoEnPantalla > ESPERA_FINAL_MS) volverAJugar();
+        break;
+      default:
+        break; // durante la animación del portal no se hace nada
+    }
+  }
+
+  /* ================================================================
+     16. SONIDO (Web Audio API, osciladores sencillos)
+     ================================================================ */
+  let audio = null;
+
+  function iniciarAudio() {
+    if (!audio) {
+      const ContextoAudio = window.AudioContext || window.webkitAudioContext;
+      if (!ContextoAudio) return;
+      const contexto = new ContextoAudio();
+      const general = contexto.createGain();
+      general.gain.value = 0.5; // volumen general bajo
+      general.connect(contexto.destination);
+      const musica = contexto.createGain();
+      musica.gain.value = progreso.musica ? 1 : 0;
+      musica.connect(general);
+      audio = { ctx: contexto, general, musica, siguienteNota: 0, indiceNota: 0 };
+    }
+    if (audio.ctx.state === 'suspended') audio.ctx.resume();
+  }
+
+  function midiAFrecuencia(nota) { return 440 * Math.pow(2, (nota - 69) / 12); }
+
+  function tono({ frec, frecFinal = null, dur = 0.12, tipo = 'square', vol = 0.05, retraso = 0, destino = null }) {
+    if (!audio) return;
+    const t0 = audio.ctx.currentTime + Math.max(0, retraso);
+    const oscilador = audio.ctx.createOscillator();
+    const ganancia = audio.ctx.createGain();
+    oscilador.type = tipo;
+    oscilador.frequency.setValueAtTime(frec, t0);
+    if (frecFinal) oscilador.frequency.exponentialRampToValueAtTime(frecFinal, t0 + dur);
+    ganancia.gain.setValueAtTime(0.0001, t0);
+    ganancia.gain.exponentialRampToValueAtTime(vol, t0 + 0.012);
+    ganancia.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    oscilador.connect(ganancia);
+    ganancia.connect(destino || audio.general);
+    oscilador.start(t0);
+    oscilador.stop(t0 + dur + 0.03);
+  }
+
+  function sonidoPaso() { tono({ frec: 260, frecFinal: 340, dur: 0.06, tipo: 'triangle', vol: 0.05 }); }
+  function sonidoChoque() { tono({ frec: 160, frecFinal: 110, dur: 0.1, tipo: 'triangle', vol: 0.06 }); }
+
+  function sonidoRecoger(numero) {
+    const base = [76, 79, 84][numero - 1] || 76;
+    tono({ frec: midiAFrecuencia(base), dur: 0.08, tipo: 'square', vol: 0.04 });
+    tono({ frec: midiAFrecuencia(base + 7), dur: 0.14, tipo: 'square', vol: 0.04, retraso: 0.08 });
+  }
+
+  function sonidoRezagado() {
+    tono({ frec: midiAFrecuencia(72), dur: 0.14, tipo: 'triangle', vol: 0.06 });
+    tono({ frec: midiAFrecuencia(67), dur: 0.2, tipo: 'triangle', vol: 0.06, retraso: 0.14 });
+  }
+
+  function sonidoPortalCerrado() {
+    tono({ frec: midiAFrecuencia(64), dur: 0.12, tipo: 'triangle', vol: 0.05 });
+    tono({ frec: midiAFrecuencia(62), dur: 0.16, tipo: 'triangle', vol: 0.05, retraso: 0.13 });
+  }
+
+  function sonidoReinicio() {
+    tono({ frec: midiAFrecuencia(67), frecFinal: midiAFrecuencia(72), dur: 0.18, tipo: 'triangle', vol: 0.05 });
+  }
+
+  // «Whoosh»: ruido filtrado que sube de tono + un barrido suave.
+  function sonidoPortal() {
+    if (!audio) return;
+    const c = audio.ctx;
+    const duracion = 0.9;
+    const t0 = c.currentTime;
+    const buffer = c.createBuffer(1, Math.floor(c.sampleRate * duracion), c.sampleRate);
+    const datos = buffer.getChannelData(0);
+    for (let i = 0; i < datos.length; i++) datos[i] = Math.random() * 2 - 1;
+    const ruido = c.createBufferSource();
+    ruido.buffer = buffer;
+    const filtro = c.createBiquadFilter();
+    filtro.type = 'bandpass';
+    filtro.Q.value = 1.2;
+    filtro.frequency.setValueAtTime(300, t0);
+    filtro.frequency.exponentialRampToValueAtTime(2600, t0 + duracion * 0.75);
+    const ganancia = c.createGain();
+    ganancia.gain.setValueAtTime(0.0001, t0);
+    ganancia.gain.exponentialRampToValueAtTime(0.12, t0 + 0.3);
+    ganancia.gain.exponentialRampToValueAtTime(0.0001, t0 + duracion);
+    ruido.connect(filtro);
+    filtro.connect(ganancia);
+    ganancia.connect(audio.general);
+    ruido.start(t0);
+    ruido.stop(t0 + duracion);
+    tono({ frec: 300, frecFinal: 1100, dur: 0.8, tipo: 'sine', vol: 0.04 });
+  }
+
+  function sonidoNivelCompleto(estrellas) {
+    [72, 76, 79, 84].forEach((nota, i) => {
+      tono({ frec: midiAFrecuencia(nota), dur: 0.16, tipo: 'triangle', vol: 0.07, retraso: i * 0.1 });
+    });
+    for (let i = 0; i < estrellas; i++) {
+      tono({ frec: midiAFrecuencia(84 + i * 4), dur: 0.12, tipo: 'square', vol: 0.03, retraso: 0.45 + i * 0.25 });
+    }
+  }
+
+  function sonidoFinal() {
+    [72, 76, 79, 84, 79, 84, 88].forEach((nota, i) => {
+      tono({ frec: midiAFrecuencia(nota), dur: 0.2, tipo: 'triangle', vol: 0.07, retraso: i * 0.15 });
+    });
+  }
+
+  /* ---------- Musiquita de fondo (pentatónica, muy suave) ---------- */
+  const MELODIA = [
+    72, null, 76, null, 79, 76, 74, null, 72, null, 74, 76, 74, null, 67, null,
+    69, null, 72, null, 76, 74, 72, null, 74, null, 76, 74, 72, null, null, null,
+  ];
+  const BAJOS = [48, 45, 41, 43];
+  const PASO_MUSICA_S = 0.3;
+
+  function programarMusica() {
+    if (!audio || !progreso.musica || audio.ctx.state !== 'running') return;
+    const ahora = audio.ctx.currentTime;
+    if (audio.siguienteNota < ahora) audio.siguienteNota = ahora + 0.05; // tras una pausa, no amontonar notas
+    while (audio.siguienteNota < ahora + 0.25) {
+      const paso = audio.indiceNota % MELODIA.length;
+      const retraso = audio.siguienteNota - ahora;
+      const nota = MELODIA[paso];
+      if (nota) tono({ frec: midiAFrecuencia(nota), dur: 0.26, tipo: 'triangle', vol: 0.025, retraso, destino: audio.musica });
+      if (paso % 8 === 0) {
+        const bajo = BAJOS[Math.floor(paso / 8) % BAJOS.length];
+        tono({ frec: midiAFrecuencia(bajo), dur: 1.0, tipo: 'triangle', vol: 0.03, retraso, destino: audio.musica });
+      }
+      audio.siguienteNota += PASO_MUSICA_S;
+      audio.indiceNota++;
+    }
+  }
+
+  /* ================================================================
+     17. BUCLE PRINCIPAL
+     ================================================================ */
+  let ultimoCuadro = performance.now();
+
+  function bucle(ahora) {
+    const dt = Math.min(50, Math.max(0, ahora - ultimoCuadro));
+    ultimoCuadro = ahora;
+    actualizar(dt, ahora);
+    dibujarJuego(ahora);
+    if (juego.estado === 'inicio') dibujarInicio(ahora);
+    if (juego.estado === 'final') dibujarFinal(ahora);
+    if (calibracion.abierta) actualizarPanelCalibracion(ahora);
+    programarMusica();
+    requestAnimationFrame(bucle);
+  }
+
+  /* ================================================================
+     18. ARRANQUE
+     ================================================================ */
+  function iniciar() {
+    leerPaleta();
+    NIVELES_LISTOS = NIVELES.map(analizarNivel);
+    informeDeNiveles();
+    dom.calibDebounce.textContent = `${DEBOUNCE_MS} ms`;
+
+    document.addEventListener('keydown', alPulsarTecla);
+    document.addEventListener('keyup', alSoltarTecla);
+    window.addEventListener('resize', ajustarEscenario);
+    window.addEventListener('blur', () => { dom.avisoFoco.hidden = false; });
+    window.addEventListener('focus', () => { dom.avisoFoco.hidden = true; });
+    dom.avisoFoco.addEventListener('click', () => { window.focus(); dom.avisoFoco.hidden = true; });
+
+    dom.botonComenzar.addEventListener('click', () => comenzar(false));
+    dom.botonDesdeCero.addEventListener('click', () => comenzar(true));
+    dom.botonSiguiente.addEventListener('click', () => { iniciarAudio(); siguiente(); });
+    dom.botonVolver.addEventListener('click', () => { iniciarAudio(); volverAJugar(); });
+    dom.botonReiniciar.addEventListener('click', () => { iniciarAudio(); reiniciarNivel(); soltarFoco(); });
+    dom.botonMusica.addEventListener('click', () => { iniciarAudio(); alternarMusica(); soltarFoco(); });
+    dom.botonCerrarCalibracion.addEventListener('click', alternarCalibracion);
+    dom.botonBorrarProgreso.addEventListener('click', () => {
+      progreso.nivelActual = 0;
+      progreso.estrellas = NIVELES.map(() => 0);
+      guardarProgreso();
+      actualizarPantallaInicio();
+      mostrarMensaje('Progress cleared: the next game starts at level 1');
+      soltarFoco();
+    });
+
+    ajustarEscenario();
+    prepararNivel(progreso.nivelActual); // el laberinto se ve detrás de la pantalla de inicio
+    actualizarBotonMusica();
+    actualizarPantallaInicio();
+    cambiarEstado('inicio');
+    if (!document.hasFocus()) dom.avisoFoco.hidden = false;
+    requestAnimationFrame(bucle);
+  }
+
+  iniciar();
+  </script>
+</body>
+</html>
+<!--
+=====================================================================
+  THE GREAT JELLY · INSTRUCTIONS FOR ADULTS
+=====================================================================
+
+CONNECT THE JELLIES TO THE MAKEY MAKEY
+  1. Connect the Makey Makey to the computer with its USB cable.
+  2. Place each jelly in a small dish and stick in a paperclip, a pin,
+     or a strip of aluminum foil. That is where the alligator clip goes.
+       LEFT jelly   → ← arrow on the board
+       RIGHT jelly  → → arrow
+       UP jelly     → ↑ arrow
+       DOWN jelly   → ↓ arrow
+     Arrange them in a cross in front of the screen, matching the arrows.
+  3. GROUND (EARTH): one alligator clip from any EARTH hole to an
+     aluminum foil bracelet on the child's wrist (or a metal plate
+     held with the other hand). Without ground the circuit won't close.
+  4. Open this file with a double click (Chrome, Edge or Firefox). Click
+     inside the page so it has focus and press F for fullscreen.
+  5. Press C to open calibration mode and touch each jelly:
+     the correct arrow should light up.
+
+KEYBOARD SHORTCUTS FOR ADULTS
+  C  calibration (pauses the game)   R  restart current level
+  M  music on / off                  F  fullscreen
+
+EDITING OR ADDING LEVELS
+  Find «const NIVELES» in the <script>. Each level is:
+    { nombre: 'My level', pista: 'Short hint', mapa: [ '#####', ... ] }
+  Map letters:
+    #  wall       .  floor      M  mom (one)
+    B  baby (three; colors lemon, mint and grape in reading order)
+    P  exit portal (S also works; one)
+  All rows must be the same width and the border must be #.
+  Levels are validated when the game loads. Press C to see the
+  report ("Check levels…") or open the browser console (F12).
+=====================================================================
+-->

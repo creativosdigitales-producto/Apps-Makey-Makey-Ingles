@@ -1,0 +1,2100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Falling Leaf, children's version: game for Makey Makey with real leaves.">
+<title>FALLING LEAF · CHILDREN'S VERSION</title>
+
+<!-- =========================================================
+     ESTILOS: misma paleta otoñal, textos grandes y en mayúsculas
+     ========================================================= -->
+<style>
+  :root {
+    /* ---- Paleta otoñal (el canvas lee estas mismas variables) ---- */
+    --madera-noche:  #2a1c12;
+    --madera-oscura: #3b2717;
+    --madera:        #6b4a2b;
+    --madera-clara:  #94693c;
+    --corteza:       #b48a55;
+    --ocre:          #c08a3e;
+    --ocre-claro:    #d9a95b;
+    --dorado:        #e4b95e;
+    --dorado-suave:  #f1d690;
+    --crema:         #f6ead0;
+    --papel:         #eadcb4;
+    --oliva-noche:   #2f3819;
+    --oliva-oscuro:  #3e4a22;
+    --oliva:         #6f7f36;
+    --oliva-claro:   #a3a85a;
+    --musgo:         #56602c;
+    --salvia:        #8f9a6a;
+    --rojizo:        #9c4f2c;
+    --teja:          #b8653a;
+    --piedra:        #857a68;
+    --piedra-oscura: #5a5246;
+    --piedra-clara:  #a89d86;
+    --cielo-alto:    #efdfb2;
+    --cielo-bajo:    #d3a868;
+
+    /* Tipografía redonda y muy legible para lectores que empiezan */
+    --fuente: "Trebuchet MS", Verdana, "Segoe UI", system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;                 /* sin scroll */
+    background: var(--madera-noche);
+  }
+
+  body {
+    display: grid;
+    place-items: center;
+    font-family: var(--fuente);
+    text-transform: uppercase;        /* todo el texto en mayúsculas */
+    letter-spacing: 0.03em;
+    color: var(--crema);
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .definiciones { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+  /* ---- Escenario 15:8 que siempre cabe en la pantalla ---- */
+  #escenario {
+    position: relative;
+    width:  min(100vw, calc(100vh * 15 / 8));
+    height: min(100vh, calc(100vw * 8 / 15));
+    width:  min(100vw, calc(100dvh * 15 / 8));
+    height: min(100dvh, calc(100vw * 8 / 15));
+    container-type: size;
+    overflow: hidden;
+    background: var(--cielo-alto);
+  }
+
+  #lienzo {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+  }
+
+  #vineta {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at 50% 45%, transparent 60%, rgba(42, 28, 18, 0.38) 100%);
+  }
+
+  .oculto { opacity: 0 !important; }
+
+  /* ---- HUD ---- */
+  #hud {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 2cqw;
+    padding: 1.8cqh 2.4cqw;
+    pointer-events: none;
+    transition: opacity 0.8s ease;
+  }
+
+  .hud-bloque {
+    display: flex;
+    align-items: center;
+    gap: 1cqw;
+    padding: 0.8cqh 1.4cqw;
+    background: rgba(42, 28, 18, 0.66);
+    box-shadow: 0 0 0 0.45cqh var(--madera), 0.6cqh 0.6cqh 0 0.45cqh rgba(42, 28, 18, 0.35);
+  }
+
+  .etiqueta { font-size: 3cqh; font-weight: 700; color: var(--dorado-suave); }
+
+  .valor {
+    font-size: 4.6cqh;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--crema);
+    min-width: 5.5cqw;
+    text-align: right;
+  }
+
+  /* Vidas: hojitas que se apagan al perder una */
+  #vidas { display: flex; gap: 0.3cqw; }
+
+  .vida {
+    width: 5.4cqh;
+    height: 5.4cqh;
+    color: var(--oliva-claro);
+    filter: drop-shadow(0 0.3cqh 0 var(--madera-noche));
+    transition: opacity 0.4s ease, transform 0.4s ease, color 0.4s ease;
+  }
+
+  .vida.perdida { opacity: 0.28; color: var(--madera-clara); transform: rotate(40deg) scale(0.8); }
+  .vida.ganada  { animation: brincar 0.6s ease; }
+
+  .icono-sol { width: 5cqh; height: 5cqh; color: var(--dorado); filter: drop-shadow(0 0.3cqh 0 var(--madera-noche)); }
+
+  @keyframes brincar {
+    40% { transform: scale(1.5) rotate(-10deg); color: var(--dorado-suave); }
+  }
+
+  .frase-hud {
+    flex: 1;
+    text-align: center;
+    font-size: 3.2cqh;
+    font-weight: 700;
+    opacity: 0;
+    transition: opacity 1s ease;
+  }
+
+  .frase-hud span {
+    display: inline-block;
+    padding: 0.7cqh 1.6cqw;
+    background: rgba(42, 28, 18, 0.58);
+    text-shadow: 0 0.3cqh 0 var(--madera-noche);
+  }
+
+  .frase-hud.visible { opacity: 1; }
+
+  /* ---- Medidor de la caída ---- */
+  #medidor {
+    position: absolute;
+    left: 2.2cqw;
+    top: 16cqh;
+    bottom: 6cqh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.2cqh;
+    pointer-events: none;
+    transition: opacity 0.8s ease;
+  }
+
+  .medidor-etiqueta {
+    font-size: 2.4cqh;
+    font-weight: 700;
+    color: var(--crema);
+    background: rgba(42, 28, 18, 0.58);
+    padding: 0.3cqh 0.7cqw;
+  }
+
+  .medidor-carril {
+    position: relative;
+    flex: 1;
+    width: 0.8cqw;
+    background: rgba(42, 28, 18, 0.45);
+    box-shadow: 0 0 0 0.3cqh rgba(246, 234, 208, 0.5);
+  }
+
+  #medidorMarca {
+    position: absolute;
+    left: 50%;
+    top: 0%;
+    width: 6cqh;
+    height: 6cqh;
+    transform: translate(-50%, -50%) rotate(25deg);
+    color: var(--oliva);
+    filter: drop-shadow(0 0.3cqh 0 var(--madera-noche));
+  }
+
+  /* ---- Mensajes ---- */
+  #capaFlotantes { position: absolute; inset: 0; pointer-events: none; }
+
+  .flotante {
+    position: absolute;
+    transform: translate(-50%, -100%);
+    font-size: 3.6cqh;
+    font-weight: 700;
+    white-space: nowrap;
+    color: var(--dorado-suave);
+    text-shadow: 0 0.35cqh 0 var(--madera-noche), 0 0 1cqh rgba(42, 28, 18, 0.7);
+    animation: flotar 1.3s ease-out forwards;
+  }
+
+  .flotante.bien { color: var(--crema); font-size: 4.2cqh; }
+  .flotante.ay   { color: var(--crema); }
+
+  @keyframes flotar {
+    0%   { opacity: 0; translate: 0 1cqh; scale: 0.7; }
+    15%  { opacity: 1; translate: 0 0; scale: 1.1; }
+    30%  { scale: 1; }
+    100% { opacity: 0; translate: 0 -6cqh; }
+  }
+
+  #mensajeCentral {
+    position: absolute;
+    left: 50%;
+    top: 32%;
+    transform: translate(-50%, -50%);
+    font-size: 8cqh;
+    font-weight: 700;
+    white-space: nowrap;
+    color: var(--crema);
+    text-shadow: 0 0.6cqh 0 var(--madera-oscura), 0 0 3cqh rgba(42, 28, 18, 0.55);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  #mensajeCentral.dorado { color: var(--dorado-suave); }
+  #mensajeCentral.animar { animation: aparecerMensaje 2s ease-out forwards; }
+
+  @keyframes aparecerMensaje {
+    0%   { opacity: 0; scale: 0.6; }
+    15%  { opacity: 1; scale: 1.08; }
+    25%  { scale: 1; }
+    75%  { opacity: 1; }
+    100% { opacity: 0; translate: 0 -3cqh; }
+  }
+
+  #poema {
+    position: absolute;
+    left: 50%;
+    top: 40%;
+    width: 74cqw;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    font-size: 5.4cqh;
+    font-weight: 700;
+    line-height: 1.45;
+    text-wrap: balance;
+    color: var(--crema);
+    text-shadow: 0 0.45cqh 0 var(--madera-oscura), 0 0 3cqh rgba(42, 28, 18, 0.75);
+    opacity: 0;
+    transition: opacity 2s ease;
+    pointer-events: none;
+  }
+
+  #poema.visible { opacity: 1; }
+
+  /* ---- Pantallas ---- */
+  .pantalla {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: radial-gradient(ellipse at center, rgba(42, 28, 18, 0.2), rgba(42, 28, 18, 0.6));
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.9s ease, visibility 0.9s ease;
+  }
+
+  .pantalla.visible { opacity: 1; visibility: visible; }
+
+  .pergamino {
+    width: min(74cqw, 128cqh);
+    max-height: 94cqh;
+    padding: 3.6cqh 3.6cqw 3.2cqh;
+    text-align: center;
+    color: var(--madera-oscura);
+    background: var(--papel);
+    box-shadow:
+      0 0 0 0.6cqh var(--madera),
+      0 0 0 1.2cqh var(--madera-oscura),
+      1.6cqh 1.6cqh 0 1.2cqh rgba(42, 28, 18, 0.4);
+  }
+
+  .titulo {
+    font-size: 11cqh;
+    line-height: 1;
+    font-weight: 700;
+    color: var(--madera);
+    text-shadow: 0.6cqh 0.6cqh 0 var(--ocre-claro);
+  }
+
+  .subtitulo {
+    margin-top: 1.4cqh;
+    font-size: 4cqh;
+    font-weight: 700;
+    color: var(--oliva-oscuro);
+  }
+
+  .guia {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2cqw;
+    margin: 3cqh 0 2cqh;
+  }
+
+  .guia-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.8cqh;
+    font-size: 3.6cqh;
+    font-weight: 700;
+    color: var(--madera);
+  }
+
+  .guia-teclas { display: flex; gap: 0.8cqw; min-height: 11cqh; align-items: center; }
+
+  /* Icono que se ilumina al tocar la hoja física (prueba de conexión) */
+  .tecla {
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    width: 10cqh;
+    height: 10cqh;
+    color: var(--oliva);
+  }
+
+  .tecla svg {
+    width: 100%;
+    height: 100%;
+    transition: transform 0.18s ease, color 0.18s ease, filter 0.18s ease;
+  }
+
+  .tecla b {
+    position: absolute;
+    top: 42%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 4cqh;
+    color: var(--crema);
+    text-shadow: 0 0.3cqh 0 var(--oliva-noche);
+  }
+
+  .tecla.ancha { width: auto; gap: 0.6cqw; display: inline-flex; }
+  .tecla.ancha svg { width: 10cqh; }
+  .tecla.ancha span { font-size: 3.4cqh; font-weight: 700; color: var(--oliva-oscuro); }
+
+  .tecla.tocada svg {
+    color: var(--dorado);
+    transform: scale(1.22) rotate(-10deg);
+    filter: drop-shadow(0 0 1.4cqh var(--dorado-suave));
+  }
+
+  .meta {
+    display: flex;
+    justify-content: center;
+    gap: 4cqw;
+    font-size: 3.2cqh;
+    font-weight: 700;
+    color: var(--madera);
+  }
+
+  .meta span { display: inline-flex; align-items: center; gap: 0.8cqw; }
+  .meta .icono-sol { width: 4.6cqh; height: 4.6cqh; }
+
+  .pista {
+    margin-top: 1.2cqh;
+    font-size: 2.8cqh;
+    color: var(--madera-clara);
+  }
+
+  .boton {
+    margin-top: 2.4cqh;
+    padding: 1.4cqh 5cqw;
+    font-family: var(--fuente);
+    font-size: 4.6cqh;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--crema);
+    background: var(--oliva);
+    border: none;
+    box-shadow: 0 0 0 0.5cqh var(--oliva-oscuro), 0 1cqh 0 0.5cqh var(--oliva-noche);
+    cursor: pointer;
+    transition: transform 0.12s ease, background 0.2s ease, opacity 0.4s ease;
+  }
+
+  .boton:hover { background: var(--musgo); }
+  .boton:active { transform: translateY(0.6cqh); }
+  .boton:focus-visible { outline: 0.5cqh dashed var(--ocre); outline-offset: 1.4cqh; }
+  .boton.esperando { opacity: 0.45; }
+
+  .record-inicio { margin-top: 1.6cqh; font-size: 2.8cqh; font-weight: 700; color: var(--madera-clara); }
+
+  /* Fin de partida */
+  .titulo-fin {
+    font-size: 7.4cqh;
+    font-weight: 700;
+    color: var(--madera);
+    text-shadow: 0.45cqh 0.45cqh 0 var(--ocre-claro);
+  }
+
+  .poema-fin {
+    margin: 1.2cqh auto 0;
+    max-width: 58cqw;
+    font-size: 3cqh;
+    font-weight: 700;
+    line-height: 1.45;
+    text-wrap: balance;
+    color: var(--oliva-oscuro);
+  }
+
+  .estrellas { display: flex; justify-content: center; gap: 2cqw; margin-top: 2cqh; }
+
+  .estrella {
+    width: 12cqh;
+    height: 12cqh;
+    color: var(--madera-clara);
+    opacity: 0.35;
+  }
+
+  .estrella.ganada {
+    color: var(--dorado);
+    opacity: 1;
+    filter: drop-shadow(0 0.5cqh 0 var(--madera));
+    animation: aparecerEstrella 0.6s ease backwards;
+  }
+
+  .estrella.ganada:nth-child(2) { animation-delay: 0.35s; }
+  .estrella.ganada:nth-child(3) { animation-delay: 0.7s; }
+
+  @keyframes aparecerEstrella {
+    0%   { transform: scale(0) rotate(-90deg); }
+    70%  { transform: scale(1.25) rotate(10deg); }
+    100% { transform: scale(1) rotate(0); }
+  }
+
+  .resultado {
+    display: flex;
+    justify-content: center;
+    gap: 6cqw;
+    margin-top: 1.6cqh;
+    font-size: 3.4cqh;
+    font-weight: 700;
+    color: var(--madera-clara);
+  }
+
+  .resultado strong { color: var(--madera-oscura); font-size: 5cqh; margin-left: 0.6cqw; font-variant-numeric: tabular-nums; }
+
+  .nuevo-record {
+    margin-top: 0.8cqh;
+    font-size: 3.6cqh;
+    font-weight: 700;
+    color: var(--teja);
+    animation: latido 1.2s ease-in-out infinite;
+  }
+
+  @keyframes latido { 50% { transform: scale(1.08); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nuevo-record, .estrella.ganada, .vida.ganada { animation: none; }
+  }
+</style>
+</head>
+
+<body>
+  <!-- Iconos pixel art reutilizables (SVG inline, sin imágenes externas) -->
+  <svg class="definiciones" aria-hidden="true" focusable="false">
+    <symbol id="iconoHoja" viewBox="0 0 16 16" shape-rendering="crispEdges">
+      <path fill="currentColor" d="M7 1h2v1h2v1h1v2h1v4h-1v2h-1v1h-2v1h-1v3h-1v-3h-1v-1h-2v-1h-1v-2h-1v-4h1v-2h1v-1h2v-1h1z"/>
+      <path fill="rgba(42,28,18,.35)" d="M7 3h1v9h-1z"/>
+    </symbol>
+    <symbol id="iconoSol" viewBox="0 0 16 16" shape-rendering="crispEdges">
+      <path fill="currentColor" d="M6 3h4v1h2v2h1v4h-1v2h-2v1h-4v-1h-2v-2h-1v-4h1v-2h2z M7 0h2v2h-2z M7 14h2v2h-2z M0 7h2v2h-2z M14 7h2v2h-2z M2 2h2v2h-2z M12 2h2v2h-2z M2 12h2v2h-2z M12 12h2v2h-2z"/>
+      <path fill="rgba(42,28,18,.55)" d="M6 7h1v1h-1z M9 7h1v1h-1z M7 10h2v1h-2z"/>
+    </symbol>
+    <symbol id="iconoEstrella" viewBox="0 0 16 16">
+      <polygon fill="currentColor" points="8,1 10,6 15.5,6 11,9.5 13,15 8,11.6 3,15 5,9.5 0.5,6 6,6"/>
+    </symbol>
+  </svg>
+
+  <main id="escenario" aria-label="FALLING LEAF GAME, CHILDREN'S VERSION">
+    <canvas id="lienzo" width="480" height="256" role="img"
+            aria-label="A LITTLE LEAF COMES DOWN A BRANCH"></canvas>
+    <div id="vineta" aria-hidden="true"></div>
+
+    <!-- HUD -->
+    <header id="hud" class="oculto">
+      <div class="hud-bloque">
+        <span class="etiqueta">LIVES</span>
+        <div id="vidas" aria-label="LIVES"></div>
+      </div>
+      <p id="fraseHud" class="frase-hud"><span></span></p>
+      <div class="hud-bloque">
+        <svg class="icono-sol" aria-hidden="true"><use href="#iconoSol"/></svg>
+        <span id="valorSoles" class="valor" aria-label="SUNS">0</span>
+        <span class="etiqueta">TIME</span><span id="valorTiempo" class="valor">1:30</span>
+      </div>
+    </header>
+
+    <div id="medidor" class="oculto" aria-hidden="true">
+      <span class="medidor-etiqueta">TOP</span>
+      <div class="medidor-carril">
+        <svg id="medidorMarca"><use href="#iconoHoja"/></svg>
+      </div>
+      <span class="medidor-etiqueta">GROUND</span>
+    </div>
+
+    <div id="capaFlotantes" aria-hidden="true"></div>
+    <p id="mensajeCentral" aria-live="polite"></p>
+    <p id="poema" aria-live="polite"></p>
+
+    <!-- Pantalla de inicio -->
+    <section id="pantallaInicio" class="pantalla visible" aria-labelledby="tituloJuego">
+      <div class="pergamino">
+        <h1 id="tituloJuego" class="titulo">FALLING LEAF</h1>
+        <p class="subtitulo">HELP THE LITTLE LEAF REACH THE GROUND!</p>
+
+        <div class="guia">
+          <div class="guia-item">
+            <div class="guia-teclas">
+              <span class="tecla" data-accion="arriba"><svg><use href="#iconoHoja"/></svg><b>↑</b></span>
+              <span class="tecla" data-accion="abajo"><svg><use href="#iconoHoja"/></svg><b>↓</b></span>
+            </div>
+            <p>UP AND DOWN</p>
+          </div>
+          <div class="guia-item">
+            <div class="guia-teclas">
+              <span class="tecla" data-accion="izquierda"><svg><use href="#iconoHoja"/></svg><b>←</b></span>
+              <span class="tecla" data-accion="derecha"><svg><use href="#iconoHoja"/></svg><b>→</b></span>
+            </div>
+            <p>BACK AND FORWARD</p>
+          </div>
+          <div class="guia-item">
+            <div class="guia-teclas">
+              <span class="tecla ancha" data-accion="espacio"><svg><use href="#iconoHoja"/></svg><span>SPACE</span></span>
+            </div>
+            <p>JUMP!</p>
+          </div>
+        </div>
+
+        <div class="meta">
+          <span><svg class="icono-sol" aria-hidden="true"><use href="#iconoSol"/></svg>COLLECT SUNS</span>
+          <span>DODGE ROCKS, TWIGS AND BUGS</span>
+        </div>
+
+        <button id="botonComenzar" class="boton" type="button">START</button>
+        <p class="pista">OR TOUCH THE SPACE LEAF</p>
+        <p id="recordInicio" class="record-inicio"></p>
+      </div>
+    </section>
+
+    <!-- Pantalla de fin -->
+    <section id="pantallaFin" class="pantalla" aria-labelledby="tituloFin">
+      <div class="pergamino">
+        <h2 id="tituloFin" class="titulo-fin">YOU REACHED THE GROUND!</h2>
+        <p id="poemaFin" class="poema-fin"></p>
+        <div class="estrellas" id="estrellas" aria-label="STARS EARNED">
+          <svg class="estrella"><use href="#iconoEstrella"/></svg>
+          <svg class="estrella"><use href="#iconoEstrella"/></svg>
+          <svg class="estrella"><use href="#iconoEstrella"/></svg>
+        </div>
+        <div class="resultado">
+          <span>SUNS<strong id="finSoles">0</strong></span>
+          <span>RECORD<strong id="finRecord">0</strong></span>
+        </div>
+        <p id="nuevoRecord" class="nuevo-record" hidden>NEW RECORD!</p>
+        <button id="botonReiniciar" class="boton" type="button">PLAY AGAIN</button>
+        <p class="pista">OR TOUCH THE SPACE LEAF</p>
+      </div>
+    </section>
+  </main>
+
+<!-- =========================================================
+     JUEGO (versión infantil)
+     Cambios respecto a la versión general:
+     - Hojita más grande y con cara; obstáculos y soles más grandes.
+     - Vidas (5 hojitas) en lugar de barra de energía, sin desgaste por tiempo.
+     - Sin castigos por tocar a destiempo: los aciertos solo suman.
+     - Más lento, menos obstáculos y nunca dos a la vez.
+     - Partida de 90 segundos y estrellas al final.
+     ========================================================= -->
+<script type="module">
+/* =========================================================
+   1. CONFIGURACIÓN
+   ========================================================= */
+const CONFIG = Object.freeze({
+  ANCHO: 480,                      // resolución interna (15:8)
+  ALTO: 256,
+  DURACION_PARTIDA: 90,            // segundos
+  DEBOUNCE_MS: 80,                 // anti‑rebote de las hojas físicas (50–100)
+
+  VELOCIDAD_INICIAL: 32,           // px/s: tranquilo para manos pequeñas
+  VELOCIDAD_FINAL: 50,
+  VELOCIDAD_DEMO: 22,
+
+  SEPARACION_CARRIL: 38,
+  HOJA_X_MIN: 64,
+  HOJA_X_MAX: 280,
+  HOJA_X_INICIAL: 130,
+  VELOCIDAD_LATERAL: 80,
+  HOJA_MEDIO_ANCHO: 9,             // caja de colisión generosa
+  HOJA_MEDIO_ALTO: 4,
+
+  // Esquive justo (segundos que faltan para llegar al obstáculo)
+  VENTANA_ESQUIVE_MIN: 0.25,
+  VENTANA_ESQUIVE_MAX: 1.2,
+
+  // Viento (ventana rítmica del Espacio), muy permisiva
+  VIENTO_AVISO: 2.2,
+  VIENTO_TOLERANCIA: 0.4,
+  VIENTO_TARDE: 0.5,
+  VIENTO_INTERVALO_MIN: 9,
+  VIENTO_INTERVALO_MAX: 13,
+
+  SALTO_DURACION: 0.8,
+  SALTO_ENFRIAMIENTO: 1.2,
+
+  // Vidas y soles
+  VIDAS_INICIALES: 5,
+  VIDAS_MAX: 5,
+  SOLES_POR_VIDA: 15,              // cada 15 soles se recupera una vida
+  SOLES_ESQUIVE: 1,
+  SOLES_VIENTO: 3,
+  INVULNERABLE: 1.6,
+
+  DURACION_MARCHITAR: 6,
+  BLOQUEO_REINICIO: 1.5,
+  INACTIVIDAD_FIN: 45,
+  CLAVE_RECORD: 'hojaQueCae.infantil.record',
+});
+
+const FRASES = [
+  'EVERY TOUCH IS A DECISION',
+  'THE LEAF TRUSTS THE WIND!',
+  'YOU FLY SO WELL!',
+  'THE TREE IS HAPPY',
+  'COLLECT LOTS OF SUNS!',
+];
+
+const ELOGIOS = ['GREAT JOB!', 'AWESOME!', 'JUST IN TIME!', 'WELL DONE!'];
+const AYES = ['OUCH!', 'WATCH OUT!', 'OOPS!'];
+
+const FINALES_TIEMPO = [
+  'THE LEAF REACHED THE GROUND. NOW IT WILL HELP A NEW TREE GROW.',
+  'LEAVES FALL, THE EARTH EMBRACES THEM AND IN SPRING EVERYTHING BLOOMS AGAIN.',
+];
+
+const FINALES_VIDAS = [
+  'THE LITTLE LEAF GOT TIRED AND CAME DOWN TO REST. IN SPRING THE TREE WILL HAVE NEW LEAVES!',
+  'THE LITTLE LEAF FELL ASLEEP ON THE GROUND. THE EARTH WILL TAKE CARE OF IT!',
+];
+
+/* =========================================================
+   2. UTILIDADES
+   ========================================================= */
+const lerp = (a, b, t) => a + (b - a) * t;
+const limitar = (v, min, max) => Math.max(min, Math.min(max, v));
+const suavizar = (t) => t * t * (3 - 2 * t);
+const azar = (a, b) => a + Math.random() * (b - a);
+const azarEntero = (a, b) => Math.floor(azar(a, b + 1));
+const elegir = (lista) => lista[Math.floor(Math.random() * lista.length)];
+
+/** Pseudoaleatorio determinista para decorar el mundo. */
+function hash(n) {
+  const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+const cacheRGB = new Map();
+function aRGB(hex) {
+  if (!cacheRGB.has(hex)) {
+    const n = parseInt(hex.slice(1), 16);
+    cacheRGB.set(hex, [(n >> 16) & 255, (n >> 8) & 255, n & 255]);
+  }
+  return cacheRGB.get(hex);
+}
+
+/** Mezcla dos colores hex y devuelve otro hex. */
+function mezclar(a, b, t) {
+  const A = aRGB(a), B = aRGB(b);
+  const r = Math.round(lerp(A[0], B[0], t));
+  const g = Math.round(lerp(A[1], B[1], t));
+  const bl = Math.round(lerp(A[2], B[2], t));
+  return '#' + ((1 << 24) | (r << 16) | (g << 8) | bl).toString(16).slice(1);
+}
+
+/* =========================================================
+   3. PALETA Y SPRITES
+   ========================================================= */
+const NOMBRES_PALETA = [
+  'madera-noche', 'madera-oscura', 'madera', 'madera-clara', 'corteza', 'ocre',
+  'ocre-claro', 'dorado', 'dorado-suave', 'crema', 'papel', 'oliva-noche',
+  'oliva-oscuro', 'oliva', 'oliva-claro', 'musgo', 'salvia', 'rojizo', 'teja',
+  'piedra', 'piedra-oscura', 'piedra-clara', 'cielo-alto', 'cielo-bajo',
+];
+
+function leerPaleta() {
+  const css = getComputedStyle(document.documentElement);
+  const paleta = {};
+  for (const nombre of NOMBRES_PALETA) {
+    const clave = nombre.replace(/-([a-z])/g, (_, letra) => letra.toUpperCase());
+    paleta[clave] = css.getPropertyValue('--' + nombre).trim() || '#ff00ff';
+  }
+  paleta.colinaLejana = mezclar(paleta.salvia, paleta.cieloBajo, 0.35);
+  paleta.troncoLejano = mezclar(paleta.madera, paleta.cieloBajo, 0.62);
+  paleta.troncoLejanoLuz = mezclar(paleta.maderaClara, paleta.cieloAlto, 0.55);
+  return paleta;
+}
+
+const P = leerPaleta();
+
+const HOJAS_VIVAS     = [P.oliva, P.olivaClaro, P.ocre, P.dorado, P.teja];
+const HOJAS_MARCHITAS = [P.madera, P.maderaClara, P.madera, P.ocre, P.maderaOscura];
+const SUELO_VIVO      = [P.ocre, P.teja, P.rojizo, P.dorado, P.maderaClara];
+
+function crearSprite(filas, colores) {
+  const c = document.createElement('canvas');
+  c.width = filas[0].length;
+  c.height = filas.length;
+  const g = c.getContext('2d');
+  filas.forEach((fila, y) => {
+    [...fila].forEach((caracter, x) => {
+      const color = colores[caracter];
+      if (color) { g.fillStyle = color; g.fillRect(x, y, 1, 1); }
+    });
+  });
+  return c;
+}
+
+/**
+ * Hojita del jugador: 27×13 píxeles (más grande que en la versión general),
+ * con ojos, mejillas y sonrisa. Si está marchita, cierra los ojos y descansa.
+ */
+function generarMapaHoja(ojosCerrados) {
+  const ancho = 27, alto = 13, inicio = 3;
+  const centroY = (alto - 1) / 2;
+  const dentro = (x, y) => {
+    if (x < inicio || x >= ancho || y < 0 || y >= alto) return false;
+    const t = (x - inicio + 0.5) / (ancho - inicio);
+    const medioAlto = (alto / 2) * Math.pow(Math.sin(Math.PI * Math.pow(t, 0.8)), 0.8);
+    return Math.abs(y - centroY) < medioAlto;
+  };
+  const filas = [];
+  for (let y = 0; y < alto; y++) {
+    const fila = [];
+    for (let x = 0; x < ancho; x++) {
+      if (!dentro(x, y)) { fila.push(y === centroY && x < inicio ? 's' : '.'); continue; }
+      const borde = !dentro(x - 1, y) || !dentro(x + 1, y) || !dentro(x, y - 1) || !dentro(x, y + 1);
+      fila.push(borde ? 'O' : (y === centroY && x < 13) ? 'V' : 'g');
+    }
+    filas.push(fila);
+  }
+  const poner = (x, y, c) => { filas[y][x] = c; };
+  for (let x = 7; x <= 11; x++) poner(x, 3, 'l');                 // brillo
+  if (ojosCerrados) {
+    [14, 15, 19, 20].forEach((x) => poner(x, 4, 'e'));
+  } else {
+    [[14, 3, 'w'], [15, 3, 'e'], [14, 4, 'e'], [15, 4, 'e'],
+     [19, 3, 'w'], [20, 3, 'e'], [19, 4, 'e'], [20, 4, 'e']].forEach(([x, y, c]) => poner(x, y, c));
+  }
+  poner(14, 7, 'e'); poner(20, 7, 'e');                            // sonrisa
+  for (let x = 15; x <= 19; x++) poner(x, 8, 'e');
+  poner(12, 7, 'r'); poner(22, 7, 'r');                            // mejillas
+  return filas.map((f) => f.join(''));
+}
+
+const INSECTO_CUERPO = [
+  '...KKrrkrrKK...',
+  '.hhKrrrkrrrrK..',
+  'hwhKrkrkrrkrK..',
+  'hhhKrrrkrrrrK..',
+  '.h.KKrrkrrKK...',
+  '....K.K.K......',
+];
+const COLORES_INSECTO = { w: P.crema, K: P.maderaNoche, r: P.rojizo, k: P.maderaOscura, h: P.maderaOscura };
+
+const SPRITES = {
+  hoja: crearSprite(generarMapaHoja(false),
+    { O: P.olivaNoche, g: P.oliva, l: P.olivaClaro, V: P.musgo, s: P.madera, e: P.maderaNoche, w: P.crema, r: P.teja }),
+  hojaMarchita: crearSprite(generarMapaHoja(true),
+    { O: P.maderaOscura, g: P.ocre, l: P.ocreClaro, V: P.madera, s: P.maderaOscura, e: P.maderaNoche, w: P.crema, r: P.rojizo }),
+  piedra: crearSprite([
+    '.....KKKK.....',
+    '...KKLLmmKK...',
+    '..KLLLppmppK..',
+    '.KLLppppppppK.',
+    'KLpppppppppppK',
+    'KppppppppppDDK',
+    'KpppppppppDDDK',
+    '.KDpppppDDDDK.',
+    '..KKDDDDDDKK..',
+    '....KKKKKK....',
+  ], { K: P.maderaNoche, L: P.piedraClara, p: P.piedra, D: P.piedraOscura, m: P.musgo }),
+  insectoA: crearSprite([
+    '.....ww.ww.....',
+    '....wwwwwww....',
+    '.....KKKKK.....',
+    ...INSECTO_CUERPO,
+  ], COLORES_INSECTO),
+  insectoB: crearSprite([
+    '...............',
+    '...............',
+    '...wwwwKKK.....',
+    ...INSECTO_CUERPO,
+  ], COLORES_INSECTO),
+  sol: crearSprite([
+    '.....o.....',
+    '....odo....',
+    '...odDdo...',
+    '..odDYDdo..',
+    '.odDkYkDdo.',
+    'odDYYYYYDdo',
+    '.odDYkYDdo.',
+    '..odDYDdo..',
+    '...odDdo...',
+    '....odo....',
+    '.....o.....',
+  ], { o: P.maderaClara, d: P.ocre, D: P.dorado, Y: P.crema, k: P.madera }),
+};
+
+function crearCielo() {
+  const c = document.createElement('canvas');
+  c.width = CONFIG.ANCHO; c.height = CONFIG.ALTO;
+  const g = c.getContext('2d');
+  const bandas = 9;
+  for (let y = 0; y < CONFIG.ALTO; y++) {
+    const t = (y / CONFIG.ALTO) * bandas;
+    const banda = Math.floor(t);
+    g.fillStyle = mezclar(P.cieloAlto, P.cieloBajo, banda / bandas);
+    g.fillRect(0, y, CONFIG.ANCHO, 1);
+    if (t - banda > 0.72) {
+      g.fillStyle = mezclar(P.cieloAlto, P.cieloBajo, (banda + 1) / bandas);
+      for (let x = (y % 2); x < CONFIG.ANCHO; x += 2) g.fillRect(x, y, 1, 1);
+    }
+  }
+  return c;
+}
+
+/* =========================================================
+   4. SONIDO (Web Audio API)
+   ========================================================= */
+const Sonido = {
+  ctx: null,
+  maestro: null,
+  bufferRuido: null,
+  silenciado: false,
+  VOLUMEN: 0.55,
+
+  iniciar() {
+    if (!this.ctx) {
+      const ContextoAudio = window.AudioContext || window.webkitAudioContext;
+      if (!ContextoAudio) return;
+      try {
+        this.ctx = new ContextoAudio();
+        this.maestro = this.ctx.createGain();
+        this.maestro.gain.value = this.silenciado ? 0 : this.VOLUMEN;
+        this.maestro.connect(this.ctx.destination);
+        this.bufferRuido = this.crearRuidoMarron();
+        this.iniciarViento();
+      } catch (error) {
+        console.warn('AUDIO NOT AVAILABLE:', error);
+        this.ctx = null;
+        return;
+      }
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+  },
+
+  crearRuidoMarron() {
+    const buffer = this.ctx.createBuffer(1, this.ctx.sampleRate * 2, this.ctx.sampleRate);
+    const datos = buffer.getChannelData(0);
+    let ultimo = 0;
+    for (let i = 0; i < datos.length; i++) {
+      ultimo = (ultimo + 0.02 * (Math.random() * 2 - 1)) / 1.02;
+      datos[i] = ultimo * 3.5;
+    }
+    return buffer;
+  },
+
+  iniciarViento() {
+    const fuente = this.ctx.createBufferSource();
+    fuente.buffer = this.bufferRuido;
+    fuente.loop = true;
+    const filtro = this.ctx.createBiquadFilter();
+    filtro.type = 'lowpass';
+    filtro.frequency.value = 420;
+    const ganancia = this.ctx.createGain();
+    ganancia.gain.value = 0.04;
+    const oscilador = this.ctx.createOscillator();
+    oscilador.frequency.value = 0.12;
+    const profundidad = this.ctx.createGain();
+    profundidad.gain.value = 0.025;
+    oscilador.connect(profundidad).connect(ganancia.gain);
+    fuente.connect(filtro).connect(ganancia).connect(this.maestro);
+    fuente.start();
+    oscilador.start();
+  },
+
+  nota(frecuencia, duracion = 0.4, { tipo = 'sine', volumen = 0.12, retraso = 0 } = {}) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime + retraso;
+    const osc = this.ctx.createOscillator();
+    const env = this.ctx.createGain();
+    osc.type = tipo;
+    osc.frequency.setValueAtTime(frecuencia, t);
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(volumen, t + 0.015);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + duracion);
+    osc.connect(env).connect(this.maestro);
+    osc.start(t);
+    osc.stop(t + duracion + 0.05);
+  },
+
+  soplo(duracion, desde, hasta, volumen) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const fuente = this.ctx.createBufferSource();
+    fuente.buffer = this.bufferRuido;
+    const filtro = this.ctx.createBiquadFilter();
+    filtro.type = 'bandpass';
+    filtro.Q.value = 1.2;
+    filtro.frequency.setValueAtTime(desde, t);
+    filtro.frequency.exponentialRampToValueAtTime(hasta, t + duracion);
+    const env = this.ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(volumen, t + duracion * 0.3);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + duracion);
+    fuente.connect(filtro).connect(env).connect(this.maestro);
+    fuente.start(t, Math.random());
+    fuente.stop(t + duracion + 0.05);
+  },
+
+  // Sonidos alegres y suaves en escala pentatónica
+  sol()      { const f = elegir([659.3, 784, 880, 987.8, 1174.7]); this.nota(f, 0.4, { tipo: 'triangle', volumen: 0.09 }); this.nota(f * 1.5, 0.3, { volumen: 0.04, retraso: 0.06 }); },
+  carril()   { this.nota(523.3, 0.1, { tipo: 'triangle', volumen: 0.05 }); },
+  salto()    { this.nota(392, 0.25, { tipo: 'triangle', volumen: 0.07 }); this.nota(587.3, 0.25, { tipo: 'triangle', volumen: 0.06, retraso: 0.08 }); this.soplo(0.5, 300, 1200, 0.1); },
+  bien()     { [784, 987.8, 1174.7].forEach((f, i) => this.nota(f, 0.35, { tipo: 'triangle', volumen: 0.07, retraso: i * 0.06 })); },
+  superSalto() { [523.3, 659.3, 784, 1046.5, 1318.5].forEach((f, i) => this.nota(f, 0.7, { tipo: 'triangle', volumen: 0.07, retraso: i * 0.07 })); this.soplo(0.9, 400, 1800, 0.12); },
+  ay()       { this.nota(330, 0.18, { tipo: 'triangle', volumen: 0.12 }); this.nota(262, 0.3, { tipo: 'triangle', volumen: 0.1, retraso: 0.12 }); },
+  vidaExtra(){ [659.3, 784, 1046.5].forEach((f, i) => this.nota(f, 0.5, { tipo: 'sine', volumen: 0.08, retraso: i * 0.1 })); },
+  aviso()    { this.nota(784, 0.4, { volumen: 0.05 }); this.nota(1046.5, 0.5, { volumen: 0.04, retraso: 0.2 }); },
+  final()    { [784, 659.3, 587.3, 523.3, 392].forEach((f, i) => this.nota(f, 1.6, { tipo: 'triangle', volumen: 0.06, retraso: i * 0.4 })); },
+
+  alternarSilencio() {
+    this.silenciado = !this.silenciado;
+    if (this.maestro) this.maestro.gain.setTargetAtTime(this.silenciado ? 0 : this.VOLUMEN, this.ctx.currentTime, 0.1);
+  },
+};
+
+/* =========================================================
+   5. ENTRADA (Makey Makey) con anti‑rebote
+   ========================================================= */
+const MAPA_TECLAS = {
+  ArrowLeft: 'izquierda', ArrowRight: 'derecha', ArrowUp: 'arriba', ArrowDown: 'abajo', Space: 'espacio',
+  KeyA: 'izquierda', KeyD: 'derecha', KeyW: 'arriba', KeyS: 'abajo',
+};
+
+const Entrada = {
+  estado: {},
+  oyentes: [],
+
+  iniciar() {
+    for (const accion of new Set(Object.values(MAPA_TECLAS))) {
+      this.estado[accion] = { activa: false, ultimoToque: -Infinity, temporizadorSoltar: null };
+    }
+    window.addEventListener('keydown', (e) => this.alBajar(e));
+    window.addEventListener('keyup', (e) => this.alSubir(e));
+    window.addEventListener('blur', () => this.soltarTodo());
+  },
+
+  traducir(evento) {
+    if (MAPA_TECLAS[evento.code]) return MAPA_TECLAS[evento.code];
+    if (evento.key === ' ') return 'espacio';
+    return null;
+  },
+
+  alBajar(evento) {
+    const accion = this.traducir(evento);
+    if (!accion) return;
+    evento.preventDefault();
+    if (evento.repeat) return;
+    const s = this.estado[accion];
+    const ahora = performance.now();
+    // Parpadeo del contacto (soltar y volver a tocar en < DEBOUNCE_MS): mismo toque
+    if (s.temporizadorSoltar) {
+      clearTimeout(s.temporizadorSoltar);
+      s.temporizadorSoltar = null;
+      return;
+    }
+    if (s.activa) return;
+    if (ahora - s.ultimoToque < CONFIG.DEBOUNCE_MS) return;
+    s.activa = true;
+    s.ultimoToque = ahora;
+    this.oyentes.forEach((fn) => fn(accion));
+  },
+
+  alSubir(evento) {
+    const accion = this.traducir(evento);
+    if (!accion) return;
+    evento.preventDefault();
+    const s = this.estado[accion];
+    if (!s.activa || s.temporizadorSoltar) return;
+    s.temporizadorSoltar = setTimeout(() => {
+      s.activa = false;
+      s.temporizadorSoltar = null;
+    }, CONFIG.DEBOUNCE_MS);
+  },
+
+  soltarTodo() {
+    for (const s of Object.values(this.estado)) {
+      clearTimeout(s.temporizadorSoltar);
+      s.temporizadorSoltar = null;
+      s.activa = false;
+    }
+  },
+
+  estaActiva(accion) { return this.estado[accion]?.activa === true; },
+  alPulsar(fn) { this.oyentes.push(fn); },
+};
+
+/* =========================================================
+   6. ESTADO DEL JUEGO
+   ========================================================= */
+const lienzo = document.getElementById('lienzo');
+const ctx = lienzo.getContext('2d', { alpha: false });
+ctx.imageSmoothingEnabled = false;
+
+const cieloPrerender = crearCielo();
+const alturasRama = new Int16Array(CONFIG.ANCHO);
+let coloresHoja = HOJAS_VIVAS.slice();
+
+const juego = {
+  estado: 'INICIO',              // INICIO | JUGANDO | MARCHITANDO | FIN
+  reloj: 0,
+  tiempo: 0,
+  progreso: 0,
+  camara: 0,
+  velocidad: CONFIG.VELOCIDAD_DEMO,
+  descenso: 0,
+  vidas: CONFIG.VIDAS_INICIALES,
+  soles: 0,
+  solesHastaVida: 0,
+  solesAparecidos: 0,
+  solesRecogidos: 0,
+  marchitez: 0,
+  tiempoMarchitar: 0,
+  subidaSuelo: 0,
+  velocidadAlFinal: 0,
+  motivoFin: '',
+  poemaFinal: '',
+  poemaMostrado: false,
+  temblor: 0,
+  ultimoSalto: -10,
+  generadorX: 0,
+  entidades: [],
+  particulas: [],
+  hojasAmbiente: [],
+  viento: { activo: false, llegada: 0, proximo: 7 },
+  salto: { restante: 0, duracion: 1, fuerza: 0, giro: false },
+  proximaFrase: 12,
+  indiceFrase: 0,
+  tiempoEnFin: 0,
+  tiempoInactivo: 0,
+  record: 0,
+  nuevoRecord: false,
+};
+
+const hoja = {
+  x: CONFIG.HOJA_X_INICIAL,
+  carril: 1,
+  offset: 0,
+  elevacion: 0,
+  angulo: 0,
+  direccion: 0,
+  invulnerable: 0,
+  modoCaida: false,
+  yCaida: 0,
+  escalaY: 1,
+};
+
+function cargarRecord() {
+  try { return parseInt(localStorage.getItem(CONFIG.CLAVE_RECORD), 10) || 0; }
+  catch { return 0; }
+}
+
+function guardarRecord(valor) {
+  try { localStorage.setItem(CONFIG.CLAVE_RECORD, String(valor)); }
+  catch { /* sin almacenamiento: el récord dura solo esta sesión */ }
+}
+
+/* =========================================================
+   7. MUNDO
+   ========================================================= */
+/** Rama más suave que en la versión general (curvas más amplias). */
+function alturaRama(xMundo) {
+  return 128 + 24 * Math.sin(xMundo * 0.010) + 8 * Math.sin(xMundo * 0.027 + 1.3);
+}
+
+function alturaSuelo() {
+  const porProgreso = suavizar(limitar((juego.progreso - 0.85) / 0.15, 0, 1));
+  return lerp(CONFIG.ALTO + 14, 226, Math.max(porProgreso, juego.subidaSuelo));
+}
+
+function posicionY(e) {
+  let y = alturaRama(e.xMundo) + (e.carril - 1) * CONFIG.SEPARACION_CARRIL;
+  if (e.tipo === 'insecto') y += Math.sin(juego.reloj * 3 + e.fase) * 2;
+  if (e.tipo === 'sol') y += Math.sin(juego.reloj * 2 + e.fase) * 1.5;
+  return y + (e.yExtra || 0);
+}
+
+function hojaY() {
+  if (hoja.modoCaida) return hoja.yCaida;
+  return alturaRama(juego.camara + hoja.x) + hoja.offset + hoja.elevacion;
+}
+
+function crearObstaculo(x, carril) {
+  let tipo;
+  if (carril === 1) tipo = Math.random() < 0.65 ? 'piedra' : 'insecto';
+  else tipo = Math.random() < 0.55 ? 'ramaSeca' : 'insecto';
+  const medidas = { piedra: [6, 4], insecto: [6, 4], ramaSeca: [2, 9] };
+  juego.entidades.push({
+    tipo, carril, xMundo: x,
+    mw: medidas[tipo][0], mh: medidas[tipo][1],
+    fase: Math.random() * 6,
+    velPropia: tipo === 'insecto' ? azar(4, 9) : 0,
+    inclinacion: Math.random() < 0.5 ? -1 : 1,
+    esObstaculo: true,
+    resuelto: false, golpeado: false, huye: false,
+    yExtra: 0, vivo: true,
+  });
+}
+
+function crearSol(x, carril) {
+  juego.solesAparecidos++;
+  juego.entidades.push({ tipo: 'sol', carril, xMundo: x, fase: Math.random() * 6, esObstaculo: false, yExtra: 0, vivo: true });
+}
+
+/** Patrones sencillos: nunca hay dos obstáculos juntos. */
+function crearPatron() {
+  const dificultad = juego.progreso;
+  const x = juego.generadorX;
+  let ancho = 24;
+  const r = Math.random();
+  const probabilidadObstaculo = 0.4 + 0.15 * dificultad;
+
+  if (r < probabilidadObstaculo) {
+    const carril = azarEntero(0, 2);
+    crearObstaculo(x, carril);
+    if (Math.random() < 0.6) crearSol(x, (carril + azarEntero(1, 2)) % 3);   // premio en otro camino
+  } else if (r < probabilidadObstaculo + 0.35) {
+    const carril = azarEntero(0, 2);
+    const cantidad = azarEntero(3, 4);
+    for (let i = 0; i < cantidad; i++) crearSol(x + i * 20, carril);
+    ancho = cantidad * 20;
+  } else {
+    const secuencia = elegir([[0, 1, 2], [2, 1, 0], [1, 0, 1], [1, 2, 1]]);
+    secuencia.forEach((carril, i) => crearSol(x + i * 24, carril));
+    ancho = secuencia.length * 24;
+  }
+  juego.generadorX += ancho + lerp(150, 110, dificultad) + Math.random() * 60;
+}
+
+function generarMundo() {
+  const limite = juego.camara + CONFIG.ANCHO + 40;
+  while (juego.generadorX < limite) crearPatron();
+}
+
+/* =========================================================
+   8. LÓGICA
+   ========================================================= */
+function emitir(x, y, cantidad, { colores, velocidad = 30, vida = 0.8, gravedad = 0, tam = 1 }) {
+  for (let i = 0; i < cantidad; i++) {
+    const angulo = Math.random() * Math.PI * 2;
+    const rapidez = velocidad * azar(0.3, 1);
+    juego.particulas.push({
+      x, y,
+      vx: Math.cos(angulo) * rapidez,
+      vy: Math.sin(angulo) * rapidez,
+      vida, maxVida: vida, gravedad, tam,
+      color: elegir(colores),
+    });
+  }
+}
+
+function multiplicadorSalto() {
+  const s = juego.salto;
+  if (s.restante <= 0) return 1;
+  const k = 1 - s.restante / s.duracion;
+  return 1 + s.fuerza * Math.sin(Math.PI * k);
+}
+
+function aplicarSalto(fuerza, duracion, giro) {
+  Object.assign(juego.salto, { restante: duracion, duracion, fuerza, giro });
+}
+
+/** Suma soles; cada cierto número se recupera una vida. */
+function sumarSoles(cantidad) {
+  juego.soles += cantidad;
+  juego.solesHastaVida += cantidad;
+  if (juego.solesHastaVida >= CONFIG.SOLES_POR_VIDA) {
+    juego.solesHastaVida -= CONFIG.SOLES_POR_VIDA;
+    if (juego.vidas < CONFIG.VIDAS_MAX) {
+      juego.vidas++;
+      Sonido.vidaExtra();
+      UI.mensaje('ONE MORE LEAF!', 'dorado');
+      UI.actualizarVidas(true);
+    }
+  }
+}
+
+function comenzarPartida() {
+  Object.assign(juego, {
+    estado: 'JUGANDO', tiempo: 0, progreso: 0,
+    vidas: CONFIG.VIDAS_INICIALES, soles: 0, solesHastaVida: 0,
+    solesAparecidos: 0, solesRecogidos: 0,
+    marchitez: 0, tiempoMarchitar: 0, subidaSuelo: 0, temblor: 0,
+    ultimoSalto: -10, entidades: [], particulas: [],
+    proximaFrase: 12, poemaMostrado: false,
+    tiempoEnFin: 0, tiempoInactivo: 0, nuevoRecord: false,
+  });
+  juego.viento = { activo: false, llegada: 0, proximo: 7 };
+  juego.salto = { restante: 0, duracion: 1, fuerza: 0, giro: false };
+  juego.generadorX = juego.camara + CONFIG.ANCHO + 100;
+  Object.assign(hoja, { x: CONFIG.HOJA_X_INICIAL, carril: 1, offset: 0, elevacion: 0, invulnerable: 0, modoCaida: false, escalaY: 1 });
+
+  UI.mostrarPantalla(null);
+  UI.mostrarHud(true);
+  UI.ocultarPoema();
+  UI.actualizarVidas(false);
+  UI.mensaje('HERE WE GO!');
+  UI.actualizarHud();
+}
+
+function volverAInicio() {
+  Object.assign(juego, { estado: 'INICIO', entidades: [], marchitez: 0, subidaSuelo: 0, progreso: 0, tiempo: 0 });
+  Object.assign(hoja, { x: CONFIG.HOJA_X_INICIAL, carril: 1, modoCaida: false, escalaY: 1, elevacion: 0 });
+  UI.ocultarPoema();
+  UI.mostrarHud(false);
+  UI.mostrarPantalla('inicio');
+}
+
+/* ---- Acciones ---- */
+function cambiarCarril(delta) {
+  const nuevo = limitar(hoja.carril + delta, 0, 2);
+  if (nuevo === hoja.carril) return;
+  evaluarEsquive(hoja.carril);
+  hoja.carril = nuevo;
+  Sonido.carril();
+}
+
+/** Si cambia de camino en el momento justo, recibe un premio (nunca castigo). */
+function evaluarEsquive(carrilAnterior) {
+  for (const e of juego.entidades) {
+    if (!e.esObstaculo || e.carril !== carrilAnterior || e.resuelto || e.golpeado) continue;
+    const distancia = (e.xMundo - juego.camara) - hoja.x - (e.mw + CONFIG.HOJA_MEDIO_ANCHO);
+    const tiempoHasta = distancia / Math.max(juego.velocidad + e.velPropia, 1);
+    if (tiempoHasta >= CONFIG.VENTANA_ESQUIVE_MIN && tiempoHasta <= CONFIG.VENTANA_ESQUIVE_MAX) {
+      e.resuelto = true;
+      const sx = e.xMundo - juego.camara, sy = posicionY(e);
+      sumarSoles(CONFIG.SOLES_ESQUIVE);
+      Sonido.bien();
+      emitir(sx, sy, 10, { colores: [P.doradoSuave, P.crema, P.dorado], velocidad: 28, vida: 0.7 });
+      UI.flotante(elegir(ELOGIOS), sx, sy - 10, 'bien');
+      return;
+    }
+  }
+}
+
+/** Espacio: salto (protege de los obstáculos). Si hay viento y lo hace a tiempo: súper salto. */
+function saltar() {
+  if (juego.reloj - juego.ultimoSalto < CONFIG.SALTO_ENFRIAMIENTO) return;
+  juego.ultimoSalto = juego.reloj;
+  const v = juego.viento;
+  const x = hoja.x, y = hojaY();
+
+  if (v.activo) {
+    const diferencia = juego.tiempo - v.llegada;
+    v.activo = false;
+    v.proximo = juego.tiempo + azar(CONFIG.VIENTO_INTERVALO_MIN, CONFIG.VIENTO_INTERVALO_MAX);
+    if (Math.abs(diferencia) <= CONFIG.VIENTO_TOLERANCIA) {
+      sumarSoles(CONFIG.SOLES_VIENTO);
+      aplicarSalto(0.9, 1.3, true);
+      Sonido.superSalto();
+      emitir(x, y, 26, { colores: [P.dorado, P.doradoSuave, P.crema], velocidad: 50, vida: 1 });
+      UI.mensaje('SUPER JUMP!', 'dorado');
+      UI.flotante(`+${CONFIG.SOLES_VIENTO}`, x, y - 14, 'bien');
+      return;
+    }
+    UI.flotante('ALMOST!', x, y - 14, 'ay');
+  }
+  aplicarSalto(0.4, CONFIG.SALTO_DURACION, false);
+  Sonido.salto();
+  emitir(x - 10, y + 2, 6, { colores: [P.doradoSuave, P.crema], velocidad: 20, vida: 0.5 });
+}
+
+/* ---- Actualización ---- */
+function actualizar(dt) {
+  juego.reloj += dt;
+  juego.temblor = Math.max(0, juego.temblor - dt);
+  switch (juego.estado) {
+    case 'INICIO':      actualizarDemo(dt); break;
+    case 'JUGANDO':     actualizarPartida(dt); break;
+    case 'MARCHITANDO': actualizarMarchitar(dt); break;
+    case 'FIN':         actualizarFin(dt); break;
+  }
+  actualizarHojasAmbiente(dt);
+  actualizarParticulas(dt);
+}
+
+function actualizarDemo(dt) {
+  juego.velocidad = CONFIG.VELOCIDAD_DEMO;
+  juego.camara += juego.velocidad * dt;
+  juego.descenso += juego.velocidad * 0.05 * dt;
+  hoja.direccion = 0;
+  actualizarHoja(dt);
+}
+
+function actualizarPartida(dt) {
+  juego.tiempo += dt;
+  juego.progreso = Math.min(juego.tiempo / CONFIG.DURACION_PARTIDA, 1);
+
+  const base = lerp(CONFIG.VELOCIDAD_INICIAL, CONFIG.VELOCIDAD_FINAL, suavizar(juego.progreso));
+  juego.velocidad = base * multiplicadorSalto();
+  juego.camara += juego.velocidad * dt;
+  juego.descenso += juego.velocidad * 0.05 * dt;
+
+  const direccion = (Entrada.estaActiva('derecha') ? 1 : 0) - (Entrada.estaActiva('izquierda') ? 1 : 0);
+  hoja.direccion = direccion;
+  hoja.x = limitar(hoja.x + direccion * CONFIG.VELOCIDAD_LATERAL * dt, CONFIG.HOJA_X_MIN, CONFIG.HOJA_X_MAX);
+
+  actualizarHoja(dt);
+  generarMundo();
+  actualizarEntidades(dt);
+  actualizarViento();
+
+  if (juego.salto.restante > 0 && Math.random() < 0.6) {
+    emitir(hoja.x - 12, hojaY(), 1, { colores: [P.dorado, P.doradoSuave], velocidad: 8, vida: 0.6 });
+  }
+
+  if (juego.tiempo >= juego.proximaFrase && !juego.viento.activo) {
+    UI.frase(FRASES[juego.indiceFrase++ % FRASES.length]);
+    juego.proximaFrase = juego.tiempo + 18;
+  }
+
+  UI.actualizarHud();
+
+  if (juego.vidas <= 0) terminarPartida('vidas');
+  else if (juego.progreso >= 1) terminarPartida('tiempo');
+}
+
+function actualizarHoja(dt) {
+  const objetivo = (hoja.carril - 1) * CONFIG.SEPARACION_CARRIL;
+  hoja.offset += (objetivo - hoja.offset) * (1 - Math.exp(-9 * dt));
+
+  const s = juego.salto;
+  let giroExtra = 0;
+  if (s.restante > 0) {
+    s.restante = Math.max(0, s.restante - dt);
+    const k = 1 - s.restante / s.duracion;
+    hoja.elevacion = -12 * Math.sin(Math.PI * k);
+    giroExtra = s.giro ? Math.PI * 2 * suavizar(k) : Math.sin(k * Math.PI * 2) * 0.3;
+  } else {
+    hoja.elevacion = 0;
+  }
+  hoja.invulnerable = Math.max(0, hoja.invulnerable - dt);
+
+  const xMundo = juego.camara + hoja.x;
+  const pendiente = (alturaRama(xMundo + 4) - alturaRama(xMundo - 4)) / 8;
+  hoja.angulo = Math.atan(pendiente) * 0.7 + Math.sin(juego.reloj * 1.8) * 0.1 + hoja.direccion * 0.15 + giroExtra;
+}
+
+function actualizarEntidades(dt) {
+  const hx = hoja.x;
+  const hy = hojaY();
+  const protegida = juego.salto.restante > 0 || hoja.invulnerable > 0;
+
+  for (const e of juego.entidades) {
+    if (e.velPropia) e.xMundo -= e.velPropia * dt;
+    if (e.huye) { e.yExtra -= 45 * dt; e.xMundo += 25 * dt; }
+    const sx = e.xMundo - juego.camara;
+    if (sx < -40 || e.yExtra < -200) { e.vivo = false; continue; }
+    if (juego.estado !== 'JUGANDO') continue;
+
+    const sy = posicionY(e);
+    if (e.tipo === 'sol') {
+      if (Math.hypot(sx - hx, sy - hy) < 14) recogerSol(e, sx, sy);
+    } else if (!e.golpeado && !protegida) {
+      if (Math.abs(sx - hx) < e.mw + CONFIG.HOJA_MEDIO_ANCHO && Math.abs(sy - hy) < e.mh + CONFIG.HOJA_MEDIO_ALTO) {
+        golpear(e, sx, sy);
+      }
+    }
+  }
+  juego.entidades = juego.entidades.filter((e) => e.vivo);
+}
+
+function recogerSol(e, sx, sy) {
+  e.vivo = false;
+  juego.solesRecogidos++;
+  sumarSoles(1);
+  Sonido.sol();
+  emitir(sx, sy, 8, { colores: [P.dorado, P.doradoSuave, P.crema], velocidad: 24, vida: 0.55 });
+  UI.flotante('+1', sx, sy - 8);
+}
+
+function golpear(e, sx, sy) {
+  e.golpeado = true;
+  if (e.tipo === 'insecto') e.huye = true;
+  juego.vidas = Math.max(0, juego.vidas - 1);
+  juego.temblor = 0.3;
+  hoja.invulnerable = CONFIG.INVULNERABLE;
+  Sonido.ay();
+  emitir(sx, sy, 10, { colores: [P.madera, P.maderaClara, P.corteza], velocidad: 35, vida: 0.7, gravedad: 60 });
+  UI.flotante(elegir(AYES), sx, sy - 12, 'ay');
+  UI.actualizarVidas(false);
+}
+
+/** Viento: el círculo dorado se cierra; tocar Espacio a tiempo da un súper salto. */
+function actualizarViento() {
+  const v = juego.viento;
+  if (!v.activo && juego.tiempo >= v.proximo && juego.progreso < 0.96) {
+    v.activo = true;
+    v.llegada = juego.tiempo + CONFIG.VIENTO_AVISO;
+    UI.frase('THE WIND IS COMING! PRESS SPACE WHEN THE CIRCLE CLOSES', CONFIG.VIENTO_AVISO + 0.6);
+    Sonido.aviso();
+  }
+  if (v.activo && juego.tiempo > v.llegada + CONFIG.VIENTO_TARDE) {
+    v.activo = false;                       // se fue sin castigo
+    v.proximo = juego.tiempo + azar(CONFIG.VIENTO_INTERVALO_MIN, CONFIG.VIENTO_INTERVALO_MAX);
+  }
+}
+
+function terminarPartida(motivo) {
+  juego.estado = 'MARCHITANDO';
+  juego.motivoFin = motivo;
+  juego.tiempoMarchitar = 0;
+  juego.velocidadAlFinal = juego.velocidad;
+  juego.viento.activo = false;
+  juego.salto.restante = 0;
+  hoja.yCaida = hojaY();
+  hoja.modoCaida = true;
+  hoja.invulnerable = 0;
+
+  juego.poemaFinal = elegir(motivo === 'tiempo' ? FINALES_TIEMPO : FINALES_VIDAS);
+  if (juego.soles > juego.record) {
+    juego.record = juego.soles;
+    juego.nuevoRecord = true;
+    guardarRecord(juego.soles);
+  }
+  UI.mostrarHud(false);
+  UI.limpiarFrase();
+  Sonido.final();
+}
+
+function actualizarMarchitar(dt) {
+  juego.tiempoMarchitar += dt;
+  const k = juego.tiempoMarchitar;
+
+  juego.velocidad = juego.velocidadAlFinal * Math.max(0, 1 - k / 2.2);
+  juego.camara += juego.velocidad * dt;
+  juego.descenso += juego.velocidad * 0.05 * dt;
+  juego.marchitez = suavizar(limitar(k / 3.5, 0, 1));
+  juego.subidaSuelo = suavizar(limitar(k / 2.8, 0, 1));
+
+  const objetivo = alturaSuelo() - 5;
+  hoja.yCaida += (objetivo - hoja.yCaida) * (1 - Math.exp(-1.1 * dt));
+  hoja.x += Math.sin(k * 1.6) * 14 * dt;
+  const asentada = limitar((k - 2.5) / 2, 0, 1);
+  hoja.angulo = lerp(Math.sin(k * 2.1) * 0.6, 0.05, asentada);
+  hoja.escalaY = 1 - 0.2 * juego.marchitez;
+
+  actualizarEntidades(dt);
+
+  if (!juego.poemaMostrado && k > 1.4) {
+    UI.mostrarPoema(juego.poemaFinal);
+    juego.poemaMostrado = true;
+  }
+  if (k >= CONFIG.DURACION_MARCHITAR) mostrarFin();
+}
+
+function calcularEstrellas() {
+  const proporcion = juego.solesRecogidos / Math.max(1, juego.solesAparecidos);
+  return 1 + (proporcion >= 0.35 ? 1 : 0) + (proporcion >= 0.6 ? 1 : 0);   // siempre al menos una
+}
+
+function mostrarFin() {
+  juego.estado = 'FIN';
+  juego.tiempoEnFin = 0;
+  juego.tiempoInactivo = 0;
+  UI.ocultarPoema();
+  UI.mostrarFin(calcularEstrellas());
+}
+
+function actualizarFin(dt) {
+  juego.tiempoEnFin += dt;
+  juego.tiempoInactivo += dt;
+  UI.bloquearReinicio(juego.tiempoEnFin < CONFIG.BLOQUEO_REINICIO);
+  if (juego.tiempoInactivo > CONFIG.INACTIVIDAD_FIN) volverAInicio();
+}
+
+/* ---- Ambiente ---- */
+function crearHojaAmbiente() {
+  return {
+    x: Math.random() * (CONFIG.ANCHO + 40),
+    y: Math.random() * CONFIG.ALTO,
+    vx: azar(4, 12),
+    vy: azar(7, 16),
+    fase: Math.random() * 6,
+    color: azarEntero(0, HOJAS_VIVAS.length - 1),
+    capa: Math.random() < 0.72 ? 'fondo' : 'frente',
+    tam: Math.random() < 0.4 ? 3 : 2,
+  };
+}
+
+function actualizarHojasAmbiente(dt) {
+  for (const h of juego.hojasAmbiente) {
+    const arrastre = h.capa === 'frente' ? 0.9 : 0.4;
+    h.x -= (h.vx + juego.velocidad * arrastre) * dt;
+    h.y += h.vy * dt;
+    h.fase += dt * 2;
+    if (h.y > CONFIG.ALTO + 4) { h.y = -4; h.x = Math.random() * (CONFIG.ANCHO + 40); }
+    if (h.x < -8) { h.x = CONFIG.ANCHO + 4; h.y = Math.random() * CONFIG.ALTO * 0.7; }
+  }
+}
+
+function actualizarParticulas(dt) {
+  for (const p of juego.particulas) {
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += p.gravedad * dt;
+    p.vida -= dt;
+  }
+  juego.particulas = juego.particulas.filter((p) => p.vida > 0);
+}
+
+/* =========================================================
+   9. RENDER
+   ========================================================= */
+function discoPixel(cx, cy, radio, color) {
+  ctx.fillStyle = color;
+  for (let dy = -radio; dy <= radio; dy++) {
+    const ancho = Math.floor(Math.sqrt(radio * radio - dy * dy));
+    ctx.fillRect(Math.round(cx) - ancho, Math.round(cy) + dy, ancho * 2 + 1, 1);
+  }
+}
+
+function anilloPixel(cx, cy, radio, color) {
+  ctx.fillStyle = color;
+  const pasos = Math.max(16, Math.floor(radio * 6.5));
+  let ultimoX = null, ultimoY = null;
+  for (let i = 0; i < pasos; i++) {
+    const a = (i / pasos) * Math.PI * 2;
+    const px = Math.round(cx + Math.cos(a) * radio);
+    const py = Math.round(cy + Math.sin(a) * radio);
+    if (px === ultimoX && py === ultimoY) continue;
+    ctx.fillRect(px, py, 1, 1);
+    ultimoX = px; ultimoY = py;
+  }
+}
+
+function dibujar() {
+  const m = juego.marchitez;
+  const camX = Math.floor(juego.camara);
+  coloresHoja = HOJAS_VIVAS.map((c, i) => (m > 0 ? mezclar(c, HOJAS_MARCHITAS[i], m) : c));
+
+  ctx.fillStyle = P.maderaNoche;
+  ctx.fillRect(0, 0, CONFIG.ANCHO, CONFIG.ALTO);
+  ctx.save();
+  if (juego.temblor > 0) ctx.translate(Math.round(azar(-1.5, 1.5)), Math.round(azar(-1.5, 1.5)));
+
+  dibujarCielo();
+  dibujarColinas(camX);
+  dibujarTroncos(camX);
+  dibujarCopa(camX, m);
+  dibujarHojasAmbiente('fondo');
+  dibujarSuelo(camX, m);
+  dibujarRama(camX, m);
+  dibujarEntidades(camX);
+  dibujarViento();
+  dibujarHoja();
+  dibujarParticulas();
+  dibujarHojasAmbiente('frente');
+
+  if (m > 0) {
+    ctx.fillStyle = `rgba(74, 46, 22, ${0.24 * m})`;
+    ctx.fillRect(0, 0, CONFIG.ANCHO, CONFIG.ALTO);
+  }
+  ctx.restore();
+}
+
+function dibujarCielo() {
+  ctx.drawImage(cieloPrerender, 0, 0);
+  ctx.fillStyle = `rgba(184, 101, 58, ${0.12 * juego.progreso})`;
+  ctx.fillRect(0, 0, CONFIG.ANCHO, CONFIG.ALTO);
+  const solY = 44 + juego.progreso * 72;
+  ctx.globalAlpha = 0.3;
+  discoPixel(388, solY, 17, P.doradoSuave);
+  ctx.globalAlpha = 1;
+  discoPixel(388, solY, 11, P.doradoSuave);
+  discoPixel(386, solY - 2, 7, P.crema);
+}
+
+function dibujarColinas(camX) {
+  const base = 300 - 70 * suavizar(Math.max(juego.progreso, juego.subidaSuelo));
+  ctx.fillStyle = juego.marchitez > 0 ? mezclar(P.colinaLejana, P.ocreClaro, juego.marchitez * 0.55) : P.colinaLejana;
+  const desplazamiento = camX * 0.12;
+  for (let x = 0; x < CONFIG.ANCHO; x += 2) {
+    const wx = x + desplazamiento;
+    const y = Math.round(base - (26 + 12 * Math.sin(wx * 0.018) + 7 * Math.sin(wx * 0.047 + 2)));
+    if (y < CONFIG.ALTO) ctx.fillRect(x, y, 2, CONFIG.ALTO - y);
+  }
+}
+
+function dibujarTroncos(camX) {
+  const paralaje = camX * 0.35;
+  const espacio = 110;
+  const primero = Math.floor(paralaje / espacio) - 1;
+  for (let k = primero; k < primero + 7; k++) {
+    const x = Math.round(k * espacio - paralaje + hash(k) * 50);
+    const ancho = 6 + Math.floor(hash(k + 11) * 9);
+    ctx.fillStyle = P.troncoLejano;
+    ctx.fillRect(x, 0, ancho, CONFIG.ALTO);
+    ctx.fillStyle = P.troncoLejanoLuz;
+    ctx.fillRect(x, 0, 1, CONFIG.ALTO);
+    ctx.fillStyle = P.troncoLejano;
+    for (let j = 0; j < 2; j++) {
+      const yBase = hash(k * 3 + j) * 400 - juego.descenso;
+      const y = Math.round(((yBase % 300) + 300) % 300) - 20;
+      const lado = hash(k + j * 7) > 0.5 ? 1 : -1;
+      for (let i = 0; i < 9; i++) {
+        const px = lado > 0 ? x + ancho + i : x - 1 - i;
+        ctx.fillRect(px, y - Math.floor(i / 2), 1, 2);
+      }
+    }
+  }
+}
+
+function dibujarCopa(camX, m) {
+  const retirada = suavizar(limitar(juego.progreso / 0.28, 0, 1)) * 90;
+  if (retirada >= 90) return;
+  const paralaje = camX * 0.5;
+  const profundidades = [];
+  ctx.fillStyle = mezclar(P.musgo, P.maderaOscura, m * 0.8);
+  for (let x = 0; x < CONFIG.ANCHO; x += 2) {
+    const wx = x + paralaje;
+    const profundidad = Math.round(34 + 12 * Math.sin(wx * 0.031) + 7 * Math.sin(wx * 0.083 + 1) - retirada);
+    profundidades[x >> 1] = profundidad;
+    if (profundidad > 0) ctx.fillRect(x, 0, 2, profundidad);
+  }
+  for (let x = 0; x < CONFIG.ANCHO; x += 2) {
+    const profundidad = profundidades[x >> 1];
+    if (profundidad <= -4) continue;
+    const h = hash(Math.floor((x + paralaje) / 2));
+    if (h > 0.55) {
+      ctx.fillStyle = coloresHoja[Math.floor(h * 100) % coloresHoja.length];
+      ctx.fillRect(x, profundidad, 2, 2 + Math.floor(h * 3));
+    }
+  }
+  const inicio = Math.floor(paralaje / 6) * 6;
+  for (let wx = inicio; wx < paralaje + CONFIG.ANCHO; wx += 6) {
+    const x = Math.round(wx - paralaje);
+    if (x < 0 || x >= CONFIG.ANCHO) continue;
+    const profundidad = profundidades[x >> 1];
+    for (let y = 2; y < profundidad - 3; y += 5) {
+      const h = hash(wx * 0.37 + y * 13.1);
+      if (h > 0.62) {
+        ctx.fillStyle = coloresHoja[Math.floor(h * 50) % coloresHoja.length];
+        ctx.fillRect(x + (y % 2), y, 2, 1);
+      }
+    }
+  }
+}
+
+function dibujarSuelo(camX, m) {
+  const yS = Math.round(alturaSuelo());
+  if (yS >= CONFIG.ALTO) return;
+  ctx.fillStyle = P.maderaOscura;
+  ctx.fillRect(0, yS + 3, CONFIG.ANCHO, CONFIG.ALTO - yS);
+  const coloresSuelo = SUELO_VIVO.map((c) => mezclar(c, P.madera, m * 0.5));
+  for (let x = 0; x < CONFIG.ANCHO; x += 2) {
+    const h = hash(Math.floor((x + camX) / 2));
+    ctx.fillStyle = coloresSuelo[Math.floor(h * 97) % coloresSuelo.length];
+    ctx.fillRect(x, yS + Math.floor(h * 3), 2, 3);
+    if (h > 0.7) ctx.fillRect(x, yS + 6 + Math.floor(h * 9), 2, 1);
+  }
+}
+
+function dibujarRama(camX, m) {
+  const ancho = CONFIG.ANCHO;
+  const sep = CONFIG.SEPARACION_CARRIL;
+  for (let x = 0; x < ancho; x++) alturasRama[x] = Math.round(alturaRama(camX + x));
+
+  // Caminos de aire punteados (ayudan a ver los tres caminos)
+  ctx.fillStyle = `rgba(107, 74, 43, ${0.42 * (1 - m)})`;
+  for (let x = 0; x < ancho; x++) {
+    if ((camX + x) % 8 === 0) {
+      ctx.fillRect(x, alturasRama[x] - sep, 2, 1);
+      ctx.fillRect(x, alturasRama[x] + sep, 2, 1);
+    }
+  }
+
+  ctx.fillStyle = P.maderaNoche;
+  for (let x = 0; x < ancho; x++) ctx.fillRect(x, alturasRama[x] - 5, 1, 11);
+  ctx.fillStyle = P.madera;
+  for (let x = 0; x < ancho; x++) ctx.fillRect(x, alturasRama[x] - 4, 1, 8);
+  ctx.fillStyle = P.corteza;
+  for (let x = 0; x < ancho; x++) ctx.fillRect(x, alturasRama[x] - 4, 1, 1);
+  ctx.fillStyle = P.maderaOscura;
+  for (let x = 0; x < ancho; x++) {
+    const y = alturasRama[x];
+    ctx.fillRect(x, y + 2, 1, 2);
+    const wx = camX + x;
+    if (hash(wx * 0.37) > 0.8) ctx.fillRect(x, y - 1 + Math.floor(hash(wx + 3) * 2), 1, 1);
+  }
+
+  for (let x = 2; x < ancho - 2; x++) {
+    const wx = camX + x;
+    if (wx % 7 !== 0) continue;
+    const h = hash(wx);
+    if (h < 0.78) continue;
+    const y = alturasRama[x];
+    ctx.fillStyle = coloresHoja[Math.floor(hash(wx + 1) * coloresHoja.length)];
+    if (h > 0.89) {
+      ctx.fillRect(x, y - 6, 1, 1); ctx.fillRect(x - 1, y - 7, 2, 1); ctx.fillRect(x - 2, y - 8, 2, 1);
+    } else {
+      ctx.fillRect(x, y + 6, 1, 1); ctx.fillRect(x, y + 7, 2, 1); ctx.fillRect(x + 1, y + 8, 2, 1);
+    }
+  }
+}
+
+function dibujarEntidades(camX) {
+  for (const e of juego.entidades) {
+    const sx = Math.round(e.xMundo - camX);
+    if (sx < -24 || sx > CONFIG.ANCHO + 24) continue;
+    const sy = Math.round(posicionY(e));
+    switch (e.tipo) {
+      case 'sol':      dibujarSol(sx, sy, e); break;
+      case 'piedra':   ctx.drawImage(SPRITES.piedra, sx - 7, sy - 5); break;
+      case 'insecto': {
+        const cuadro = Math.floor(juego.reloj * 10 + e.fase) % 2 === 0 ? SPRITES.insectoA : SPRITES.insectoB;
+        ctx.drawImage(cuadro, sx - 7, sy - 5);
+        break;
+      }
+      case 'ramaSeca': dibujarRamaSeca(e, sx, sy); break;
+    }
+    if (e.esObstaculo) dibujarMarcaVentana(e, sx, sy);
+  }
+}
+
+function dibujarSol(sx, sy, e) {
+  const brillo = 1 - juego.marchitez * 0.85;
+  const pulso = Math.sin(juego.reloj * 4 + e.fase * 3);
+  ctx.globalAlpha = 0.45 * brillo;
+  discoPixel(sx, sy, 9 + (pulso > 0 ? 1 : 0), P.dorado);
+  ctx.globalAlpha = brillo;
+  ctx.drawImage(SPRITES.sol, sx - 5, sy - 5);
+  if (pulso > 0.75) {
+    ctx.fillStyle = P.crema;
+    ctx.fillRect(sx - 9, sy, 2, 1); ctx.fillRect(sx + 8, sy, 2, 1);
+    ctx.fillRect(sx, sy - 9, 1, 2); ctx.fillRect(sx, sy + 8, 1, 2);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function dibujarRamaSeca(e, sx, sy) {
+  const yRama = Math.round(alturaRama(e.xMundo));
+  const direccion = e.carril === 0 ? -1 : 1;
+  const inicio = yRama + direccion * 5;
+  const fin = sy + direccion * 9;
+  const largo = Math.abs(fin - inicio);
+  for (let i = 0; i <= largo; i++) {
+    const y = inicio + direccion * i;
+    const x = sx + Math.round((i / largo) * 3 * e.inclinacion);
+    ctx.fillStyle = P.maderaOscura;
+    ctx.fillRect(x - 1, y, 1, 1);
+    ctx.fillStyle = P.corteza;
+    ctx.fillRect(x, y, 1, 1);
+    ctx.fillStyle = P.maderaClara;
+    ctx.fillRect(x + 1, y, 1, 1);
+    if (i === Math.floor(largo * 0.45) || i === Math.floor(largo * 0.75)) {
+      const lado = i === Math.floor(largo * 0.45) ? -1 : 1;
+      ctx.fillStyle = P.maderaClara;
+      for (let j = 1; j <= 4; j++) ctx.fillRect(x + lado * j, y + direccion * j, 1, 1);
+    }
+  }
+}
+
+/** Esquinas doradas = “¡ahora es buen momento para cambiar de camino!” */
+function dibujarMarcaVentana(e, sx, sy) {
+  if (juego.estado !== 'JUGANDO' || e.resuelto || e.golpeado || e.carril !== hoja.carril) return;
+  const distancia = (e.xMundo - juego.camara) - hoja.x - (e.mw + CONFIG.HOJA_MEDIO_ANCHO);
+  const tiempoHasta = distancia / Math.max(juego.velocidad + e.velPropia, 1);
+  if (tiempoHasta < CONFIG.VENTANA_ESQUIVE_MIN || tiempoHasta > CONFIG.VENTANA_ESQUIVE_MAX) return;
+  ctx.fillStyle = Math.sin(juego.reloj * 12) > 0 ? P.crema : P.dorado;
+  const a = e.mw + 5, b = e.mh + 5;
+  for (const [ex, ey, hx, vy] of [[-a, -b, 1, 1], [a, -b, -1, 1], [-a, b, 1, -1], [a, b, -1, -1]]) {
+    const x = sx + ex, y = sy + ey;
+    ctx.fillRect(Math.min(x, x + hx * 3), y, 4, 1);
+    ctx.fillRect(x, Math.min(y, y + vy * 3), 1, 4);
+  }
+}
+
+function dibujarViento() {
+  const v = juego.viento;
+  if (juego.estado !== 'JUGANDO' || !v.activo) return;
+  const falta = v.llegada - juego.tiempo;
+  const x = hoja.x, y = hojaY();
+  const enVentana = Math.abs(falta) <= CONFIG.VIENTO_TOLERANCIA;
+
+  ctx.fillStyle = 'rgba(246, 234, 208, 0.6)';
+  for (let i = 0; i < 7; i++) {
+    const lx = ((juego.reloj * 170 + i * 83) % (CONFIG.ANCHO + 60)) - 30;
+    const ly = Math.round(y + (i - 3) * 14 + Math.sin(juego.reloj * 3 + i) * 3);
+    ctx.fillRect(Math.round(lx), ly, 14 + (i % 3) * 4, 1);
+  }
+
+  const radioMeta = 15;
+  ctx.globalAlpha = 0.6;
+  anilloPixel(x, y, radioMeta, P.dorado);
+  ctx.globalAlpha = 1;
+  if (enVentana) {
+    anilloPixel(x, y, radioMeta, P.crema);
+    anilloPixel(x, y, radioMeta + 1, P.doradoSuave);
+    anilloPixel(x, y, radioMeta + 3, P.dorado);
+  } else {
+    const radio = Math.max(radioMeta, radioMeta + (falta / CONFIG.VIENTO_AVISO) * 44);
+    anilloPixel(x, y, radio, P.dorado);
+    anilloPixel(x, y, radio + 1, P.doradoSuave);
+  }
+}
+
+function dibujarHoja() {
+  if (hoja.invulnerable > 0 && Math.floor(juego.reloj * 10) % 2 === 0) return;
+  const m = juego.marchitez;
+  ctx.save();
+  ctx.translate(Math.round(hoja.x), Math.round(hojaY()));
+  ctx.rotate(hoja.angulo);
+  ctx.scale(1, hoja.escalaY);
+  if (m < 1) ctx.drawImage(SPRITES.hoja, -13, -6);
+  if (m > 0) {
+    ctx.globalAlpha = m;
+    ctx.drawImage(SPRITES.hojaMarchita, -13, -6);
+  }
+  ctx.restore();
+}
+
+function dibujarParticulas() {
+  for (const p of juego.particulas) {
+    ctx.globalAlpha = limitar(p.vida / p.maxVida, 0, 1);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(Math.round(p.x), Math.round(p.y), p.tam, p.tam);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function dibujarHojasAmbiente(capa) {
+  for (const h of juego.hojasAmbiente) {
+    if (h.capa !== capa) continue;
+    const x = Math.round(h.x + Math.sin(h.fase) * 3);
+    const y = Math.round(h.y);
+    const volteada = Math.sin(h.fase * 1.3) > 0;
+    ctx.fillStyle = coloresHoja[h.color];
+    if (h.tam === 3) {
+      if (volteada) { ctx.fillRect(x, y, 3, 1); ctx.fillRect(x + 1, y + 1, 2, 1); }
+      else { ctx.fillRect(x, y, 1, 3); ctx.fillRect(x + 1, y + 1, 1, 2); }
+    } else {
+      if (volteada) ctx.fillRect(x, y, 2, 1);
+      else ctx.fillRect(x, y, 1, 2);
+      ctx.fillRect(x + 1, y + 1, 1, 1);
+    }
+  }
+}
+
+/* =========================================================
+   10. INTERFAZ
+   ========================================================= */
+const UI = {
+  el: {},
+  temporizadorFrase: null,
+  ultimoSoles: '',
+  ultimoTiempo: '',
+
+  iniciar() {
+    const ids = [
+      'hud', 'medidor', 'medidorMarca', 'vidas', 'fraseHud', 'valorSoles', 'valorTiempo',
+      'capaFlotantes', 'mensajeCentral', 'poema', 'pantallaInicio', 'pantallaFin',
+      'botonComenzar', 'botonReiniciar', 'recordInicio', 'tituloFin', 'poemaFin',
+      'estrellas', 'finSoles', 'finRecord', 'nuevoRecord',
+    ];
+    ids.forEach((id) => { this.el[id] = document.getElementById(id); });
+
+    // Crea los iconos de vidas (hojitas)
+    this.el.vidas.innerHTML = '';
+    for (let i = 0; i < CONFIG.VIDAS_MAX; i++) {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('class', 'vida');
+      const uso = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+      uso.setAttribute('href', '#iconoHoja');
+      svg.appendChild(uso);
+      this.el.vidas.appendChild(svg);
+    }
+
+    this.el.botonComenzar.addEventListener('click', () => {
+      Sonido.iniciar();
+      this.el.botonComenzar.blur();
+      if (juego.estado === 'INICIO') comenzarPartida();
+    });
+    this.el.botonReiniciar.addEventListener('click', () => {
+      Sonido.iniciar();
+      this.el.botonReiniciar.blur();
+      if (juego.estado === 'FIN' && juego.tiempoEnFin >= CONFIG.BLOQUEO_REINICIO) comenzarPartida();
+    });
+    this.actualizarRecordInicio();
+  },
+
+  mostrarPantalla(nombre) {
+    this.el.pantallaInicio.classList.toggle('visible', nombre === 'inicio');
+    this.el.pantallaFin.classList.toggle('visible', nombre === 'fin');
+    if (nombre === 'inicio') this.actualizarRecordInicio();
+  },
+
+  mostrarHud(visible) {
+    this.el.hud.classList.toggle('oculto', !visible);
+    this.el.medidor.classList.toggle('oculto', !visible);
+  },
+
+  actualizarVidas(ganada) {
+    [...this.el.vidas.children].forEach((icono, i) => {
+      icono.classList.toggle('perdida', i >= juego.vidas);
+      if (ganada && i === juego.vidas - 1) {
+        icono.classList.remove('ganada');
+        void icono.getBoundingClientRect();
+        icono.classList.add('ganada');
+      }
+    });
+    this.el.vidas.setAttribute('aria-label', `${juego.vidas} LIVES`);
+  },
+
+  actualizarHud() {
+    const soles = String(juego.soles);
+    if (soles !== this.ultimoSoles) { this.el.valorSoles.textContent = soles; this.ultimoSoles = soles; }
+    const restante = Math.max(0, Math.ceil(CONFIG.DURACION_PARTIDA - juego.tiempo));
+    const tiempo = `${Math.floor(restante / 60)}:${String(restante % 60).padStart(2, '0')}`;
+    if (tiempo !== this.ultimoTiempo) { this.el.valorTiempo.textContent = tiempo; this.ultimoTiempo = tiempo; }
+    this.el.medidorMarca.style.top = (juego.progreso * 100).toFixed(2) + '%';
+  },
+
+  mensaje(texto, variante = '') {
+    const el = this.el.mensajeCentral;
+    el.textContent = texto;
+    el.className = variante;
+    void el.offsetWidth;
+    el.classList.add('animar');
+  },
+
+  frase(texto, duracion = 5) {
+    const el = this.el.fraseHud;
+    el.firstElementChild.textContent = texto;
+    el.classList.add('visible');
+    clearTimeout(this.temporizadorFrase);
+    this.temporizadorFrase = setTimeout(() => el.classList.remove('visible'), duracion * 1000);
+  },
+
+  limpiarFrase() {
+    clearTimeout(this.temporizadorFrase);
+    this.el.fraseHud.classList.remove('visible');
+  },
+
+  flotante(texto, x, y, variante = '') {
+    const capa = this.el.capaFlotantes;
+    if (capa.childElementCount > 12) capa.firstElementChild.remove();
+    const el = document.createElement('span');
+    el.className = 'flotante ' + variante;
+    el.textContent = texto;
+    el.style.left = limitar((x / CONFIG.ANCHO) * 100, 8, 92) + '%';
+    el.style.top = limitar((y / CONFIG.ALTO) * 100, 16, 96) + '%';
+    el.addEventListener('animationend', () => el.remove());
+    capa.appendChild(el);
+  },
+
+  mostrarPoema(texto) {
+    this.el.poema.textContent = texto;
+    this.el.poema.classList.add('visible');
+  },
+
+  ocultarPoema() { this.el.poema.classList.remove('visible'); },
+
+  mostrarFin(estrellas) {
+    this.el.tituloFin.textContent = juego.motivoFin === 'tiempo' ? 'YOU REACHED THE GROUND!' : 'GOOD TRY!';
+    this.el.poemaFin.textContent = juego.poemaFinal;
+    this.el.finSoles.textContent = juego.soles;
+    this.el.finRecord.textContent = juego.record;
+    this.el.nuevoRecord.hidden = !juego.nuevoRecord;
+    [...this.el.estrellas.children].forEach((estrella, i) => {
+      estrella.classList.remove('ganada');
+      void estrella.getBoundingClientRect();                // reinicia la animación
+      estrella.classList.toggle('ganada', i < estrellas);
+    });
+    this.el.estrellas.setAttribute('aria-label', `${estrellas} OUT OF 3 STARS`);
+    this.bloquearReinicio(true);
+    this.mostrarPantalla('fin');
+  },
+
+  bloquearReinicio(bloqueado) {
+    this.el.botonReiniciar.classList.toggle('esperando', bloqueado);
+  },
+
+  actualizarRecordInicio() {
+    this.el.recordInicio.textContent = juego.record > 0 ? `RECORD: ${juego.record} SUNS` : '';
+  },
+
+  /** Prueba de conexión: el icono de la hoja tocada se ilumina. */
+  iluminarPrueba(accion) {
+    document.querySelectorAll(`[data-accion="${accion}"]`).forEach((el) => {
+      el.classList.add('tocada');
+      clearTimeout(el._temporizador);
+      el._temporizador = setTimeout(() => el.classList.remove('tocada'), 350);
+    });
+  },
+};
+
+/* =========================================================
+   11. ARRANQUE Y BUCLE PRINCIPAL
+   ========================================================= */
+function alPulsarHoja(accion) {
+  Sonido.iniciar();
+  UI.iluminarPrueba(accion);
+  switch (juego.estado) {
+    case 'INICIO':
+      if (accion === 'espacio') comenzarPartida();
+      break;
+    case 'JUGANDO':
+      if (accion === 'arriba') cambiarCarril(-1);
+      else if (accion === 'abajo') cambiarCarril(1);
+      else if (accion === 'espacio') saltar();
+      break;
+    case 'FIN':
+      juego.tiempoInactivo = 0;
+      if (accion === 'espacio' && juego.tiempoEnFin >= CONFIG.BLOQUEO_REINICIO) comenzarPartida();
+      break;
+  }
+}
+
+/** Teclas de servicio para quien monta la instalación. */
+function teclasDeServicio(evento) {
+  if (evento.repeat) return;
+  if (evento.code === 'KeyF') {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
+    else document.exitFullscreen?.();
+  } else if (evento.code === 'KeyM') {
+    Sonido.iniciar();
+    Sonido.alternarSilencio();
+  }
+}
+
+let ultimoTiempo = performance.now();
+
+function bucle(ahora) {
+  const dt = Math.min((ahora - ultimoTiempo) / 1000, 0.05);
+  ultimoTiempo = ahora;
+  actualizar(dt);
+  dibujar();
+  requestAnimationFrame(bucle);
+}
+
+function arrancar() {
+  juego.record = cargarRecord();
+  juego.hojasAmbiente = Array.from({ length: 22 }, crearHojaAmbiente);
+  UI.iniciar();
+  UI.actualizarVidas(false);
+  Entrada.iniciar();
+  Entrada.alPulsar(alPulsarHoja);
+  window.addEventListener('keydown', teclasDeServicio);
+  requestAnimationFrame((t) => { ultimoTiempo = t; bucle(t); });
+}
+
+arrancar();
+</script>
+</body>
+</html>

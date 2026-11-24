@@ -1,0 +1,1876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>ASTRO: SPACE CAVE</title>
+<!--
+  =====================================================================
+  ASTRO: CUEVA ESPACIAL — UNA AVENTURA ESPACIAL
+  ---------------------------------------------------------------------
+  CÓMO USARLO
+  1. Guarda este archivo como index.html.
+  2. Ábrelo con cualquier navegador moderno (Chrome, Edge, Firefox, Safari).
+  3. Para una diapositiva: incrústalo como página web / iframe con
+     proporción 16:8 (2:1). El juego se escala solo, sin barras de scroll.
+
+  CONTROLES (solo 3)
+  ←  mover a la izquierda
+  →  mover a la derecha
+  ↑  saltar (en los menús: aceptar; ← → eligen la opción)
+  En pantallas táctiles hay 3 botones grandes en la parte de abajo.
+
+  OBJETIVO
+  Lleva al astronauta hasta el PORTAL brillante de cada nivel.
+  Si caes al vacío, vuelves al inicio del nivel. Son 10 niveles.
+
+  Todo (gráficos, fuente y sonidos) se genera con código:
+  Canvas para el dibujo pixel art y Web Audio API para el sonido.
+  =====================================================================
+-->
+<style>
+  html, body { width: 100%; height: 100%; }
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: #000;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #juego {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    outline: none;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<canvas id="juego" width="640" height="320" tabindex="0" aria-label="Game ASTRO: SPACE CAVE"></canvas>
+<script>
+'use strict';
+
+// ===================== CONFIG =====================
+// Todos los valores de física están en píxeles lógicos por cuadro (60 cuadros por segundo).
+const CONFIG = {
+  ANCHO: 640,            // ancho lógico del canvas
+  ALTO: 320,             // alto lógico del canvas (proporción 16:8)
+  GRAVEDAD: 0.45,        // aceleración hacia abajo
+  SALTO: -8.2,           // impulso inicial del salto (altura máxima ≈ 74 px)
+  VEL_MAX: 2.6,          // velocidad horizontal máxima
+  ACEL_SUELO: 0.35,      // qué tan rápido acelera/frena en el suelo (0 a 1)
+  ACEL_AIRE: 0.22,       // control en el aire (0 a 1)
+  CAIDA_MAX: 9,          // velocidad máxima de caída
+  COYOTE: 6,             // cuadros de margen para saltar después de salir del borde
+  BUFFER_SALTO: 8,       // cuadros que se recuerda el salto pulsado antes de aterrizar
+  JUG_W: 16,             // ancho de la caja de colisión del astronauta
+  JUG_H: 28,             // alto de la caja de colisión del astronauta
+  MURO: 16,              // grosor de los muros de la cueva (izquierda y derecha)
+  ALTO_DELGADA: 16,      // plataformas con alto <= este valor se atraviesan desde abajo
+  MARGEN_VACIO: 60,      // distancia bajo el nivel para considerar "caída al vacío"
+  MARGEN_CAMARA: 48,     // la cámara muestra un poco del abismo para que los botones no tapen al astronauta
+  PASO: 1 / 60,          // paso fijo de la simulación
+  CLAVE_GUARDADO: 'astroCuevaEspacialNivel'
+};
+
+// ===================== PALETA =====================
+const PALETA = {
+  tinta: '#0c0820',
+  noche: '#141038',
+  violeta: '#4b2a8a',
+  violetaClaro: '#7a4fd0',
+  lila: '#b996ff',
+  cian: '#4ff3ff',
+  cianMedio: '#22b8d6',
+  cianOscuro: '#137a99',
+  blanco: '#ffffff',
+  estrella: '#fff6c8',
+  naranja: '#ff8a1e',
+  naranjaOscuro: '#c4560a',
+  amarillo: '#ffd23f',
+  roca1: '#3a2a58',
+  roca2: '#4a3670',
+  roca3: '#2c1f45',
+  rocaLuz: '#64509a',
+  rocaSombra: '#1d1430',
+  musgo1: '#7dfff0',
+  musgo2: '#2fd9c4',
+  musgo3: '#14908f',
+  metal1: '#e2e6f5',
+  metal2: '#9aa3c4',
+  metal3: '#5b6288',
+  metal4: '#2b3050'
+};
+// Colores del astronauta (inspirado en el personaje de referencia: casco blanco, visor color piel)
+const COLORES_ASTRO = {
+  w: '#ffffff', // traje blanco
+  l: '#d3d8ea', // sombra suave
+  g: '#9ea6c4', // sombra fuerte
+  s: '#d9a07a', // cara (visor)
+  z: '#b47a58', // sombra del visor
+  k: '#1a1020', // ojos
+  d: '#3a3e52', // guantes y botas
+  c: '#4ff3ff', // luz del pecho
+  o: '#ff8a1e'  // mochila y hebilla naranja
+};
+const COLORES_CONFETI = ['#ff8a1e', '#4ff3ff', '#ffd23f', '#b996ff', '#ff5fa2', '#7dff8a', '#ffffff'];
+
+// ===================== NIVELES =====================
+// Cada nivel define:
+//   nombre, pista  → textos que se muestran al empezar.
+//   alto           → alto del mundo en px (si es mayor que 320, la cámara sigue al jugador).
+//   cielo          → dos colores para el fondo [arriba, abajo].
+//   inicio / meta  → { x: centro, y: superficie donde se apoyan los pies }.
+//   plataformas    → [x, y, ancho, alto]. Alto <= 16: puente de metal que se atraviesa desde abajo.
+//                    Alto > 16: bloque de roca sólido.
+// Reglas para que sea apto para 8 años: subidas de hasta 56 px y huecos de hasta 64 px.
+const NIVELES = [
+  { // 1
+    nombre: 'FIRST STEPS',
+    pista: 'USE ← → TO WALK AND ↑ TO JUMP',
+    alto: 320, cielo: ['#20185a', '#0b0a26'],
+    inicio: { x: 56, y: 240 }, meta: { x: 584, y: 176 },
+    plataformas: [
+      [16, 240, 176, 80],
+      [232, 240, 120, 80],
+      [392, 208, 104, 112],
+      [536, 176, 88, 144]
+    ]
+  },
+  { // 2
+    nombre: 'METAL BRIDGES',
+    pista: 'METAL BRIDGES WORK TOO',
+    alto: 320, cielo: ['#1a2366', '#0a0d2a'],
+    inicio: { x: 56, y: 256 }, meta: { x: 584, y: 192 },
+    plataformas: [
+      [16, 256, 128, 64],
+      [184, 232, 80, 12],
+      [304, 200, 80, 12],
+      [424, 232, 72, 12],
+      [536, 192, 88, 128]
+    ]
+  },
+  { // 3
+    nombre: 'GOING UP',
+    pista: 'CLIMB UP TO THE PORTAL!',
+    alto: 480, cielo: ['#2a1660', '#0d0828'],
+    inicio: { x: 56, y: 432 }, meta: { x: 576, y: 64 },
+    plataformas: [
+      [16, 432, 200, 48],
+      [256, 392, 96, 12],
+      [400, 352, 96, 12],
+      [512, 304, 112, 24],
+      [360, 256, 104, 12],
+      [200, 216, 104, 12],
+      [16, 176, 136, 24],
+      [192, 128, 96, 12],
+      [336, 88, 120, 12],
+      [496, 64, 128, 24]
+    ]
+  },
+  { // 4
+    nombre: 'COSMIC DESCENT',
+    pista: 'NOW DESCEND CAREFULLY',
+    alto: 560, cielo: ['#122a5e', '#060f22'],
+    inicio: { x: 56, y: 96 }, meta: { x: 576, y: 504 },
+    plataformas: [
+      [16, 96, 160, 24],
+      [224, 144, 96, 12],
+      [368, 200, 96, 12],
+      [496, 256, 128, 24],
+      [328, 312, 104, 12],
+      [176, 368, 104, 12],
+      [16, 424, 112, 24],
+      [176, 480, 96, 12],
+      [328, 504, 296, 56]
+    ]
+  },
+  { // 5
+    nombre: 'THE STATION',
+    pista: 'JUMP FROM PLATFORM TO PLATFORM',
+    alto: 640, cielo: ['#2b1a68', '#100a2e'],
+    inicio: { x: 52, y: 592 }, meta: { x: 572, y: 88 },
+    plataformas: [
+      [16, 592, 144, 48],
+      [200, 552, 72, 12],
+      [312, 512, 72, 12],
+      [424, 472, 72, 12],
+      [536, 432, 88, 24],
+      [416, 384, 64, 12],
+      [304, 344, 64, 12],
+      [192, 304, 64, 12],
+      [16, 264, 128, 24],
+      [184, 216, 64, 12],
+      [296, 176, 64, 12],
+      [408, 136, 64, 12],
+      [520, 88, 104, 24]
+    ]
+  },
+  { // 6
+    nombre: 'CRYSTAL TUNNEL',
+    pista: 'JUMP OVER THE LARGE ROCKS',
+    alto: 640, cielo: ['#0f3354', '#06121f'],
+    inicio: { x: 584, y: 80 }, meta: { x: 576, y: 584 },
+    plataformas: [
+      [440, 80, 184, 32],
+      [272, 128, 112, 12],
+      [96, 176, 120, 12],
+      [16, 240, 96, 24],
+      [152, 264, 120, 96],
+      [312, 312, 96, 12],
+      [464, 360, 160, 24],
+      [320, 424, 104, 12],
+      [168, 472, 104, 12],
+      [16, 520, 112, 24],
+      [168, 584, 200, 56],
+      [400, 544, 48, 96],
+      [488, 584, 136, 56]
+    ]
+  },
+  { // 7
+    nombre: 'LONG JUMPS',
+    pista: 'RUN BEFORE JUMPING TO REACH FAR',
+    alto: 720, cielo: ['#33175e', '#120626'],
+    inicio: { x: 52, y: 672 }, meta: { x: 584, y: 80 },
+    plataformas: [
+      [16, 672, 128, 48],
+      [208, 624, 64, 12],
+      [336, 576, 56, 12],
+      [456, 528, 64, 12],
+      [568, 480, 56, 24],
+      [440, 424, 64, 12],
+      [312, 376, 64, 12],
+      [184, 328, 64, 12],
+      [16, 280, 104, 24],
+      [176, 224, 56, 12],
+      [296, 176, 56, 12],
+      [416, 128, 56, 12],
+      [536, 80, 88, 24]
+    ]
+  },
+  { // 8
+    nombre: 'ASTEROID RING',
+    pista: 'THE PLATFORMS ARE SMALLER',
+    alto: 800, cielo: ['#1b1f6e', '#080a26'],
+    inicio: { x: 580, y: 64 }, meta: { x: 60, y: 736 },
+    plataformas: [
+      [496, 64, 128, 24],
+      [392, 120, 48, 12],
+      [280, 176, 48, 12],
+      [168, 232, 48, 12],
+      [16, 296, 96, 24],
+      [168, 352, 48, 12],
+      [280, 408, 48, 12],
+      [392, 464, 48, 12],
+      [504, 528, 120, 24],
+      [400, 592, 48, 12],
+      [288, 640, 48, 12],
+      [176, 688, 48, 12],
+      [16, 736, 104, 64]
+    ]
+  },
+  { // 9
+    nombre: 'THE GREAT TOWER',
+    pista: "THE TOWER IS VERY TALL, DON'T LOOK DOWN!",
+    alto: 880, cielo: ['#2c1150', '#0c041c'],
+    inicio: { x: 52, y: 832 }, meta: { x: 412, y: 104 },
+    plataformas: [
+      [16, 832, 112, 48],
+      [184, 776, 48, 12],
+      [296, 720, 48, 12],
+      [408, 664, 48, 12],
+      [520, 608, 104, 24],
+      [400, 552, 56, 12],
+      [280, 496, 56, 12],
+      [160, 440, 56, 12],
+      [16, 384, 88, 24],
+      [168, 328, 48, 12],
+      [280, 272, 48, 12],
+      [392, 216, 48, 12],
+      [504, 160, 48, 12],
+      [376, 104, 72, 24]
+    ]
+  },
+  { // 10
+    nombre: 'THE FINAL PORTAL',
+    pista: 'LAST LEVEL! YOU CAN DO IT',
+    alto: 960, cielo: ['#3a1a6e', '#0a0620'],
+    inicio: { x: 48, y: 912 }, meta: { x: 584, y: 72 },
+    plataformas: [
+      [16, 912, 96, 48],
+      [168, 856, 48, 12],
+      [272, 800, 48, 12],
+      [376, 744, 48, 12],
+      [480, 688, 48, 12],
+      [584, 632, 40, 24],
+      [464, 576, 56, 12],
+      [344, 520, 56, 12],
+      [224, 464, 56, 96],
+      [104, 408, 56, 12],
+      [16, 352, 40, 24],
+      [112, 296, 48, 12],
+      [216, 240, 48, 12],
+      [320, 184, 48, 12],
+      [424, 128, 56, 12],
+      [544, 72, 80, 24]
+    ]
+  }
+];
+
+// ===================== ESTADO =====================
+const estado = {
+  pantalla: 'portada',   // 'portada' | 'juego' | 'final'
+  nivel: 0,              // índice del nivel actual (0 a 9)
+  nivelGuardado: 0,      // nivel con el que empieza JUGAR
+  jugador: null,
+  camY: 0,
+  fase: 'jugando',       // 'jugando' | 'portal' | 'cayendo'
+  timerFase: 0,
+  tiempo: 0,             // cuadros totales
+  tNivel: 0,             // cuadros dentro del nivel actual
+  particulas: [],
+  menuSel: 0,            // 0 = JUGAR, 1 = REINICIAR NIVELES
+  aviso: '', avisoT: 0,
+  fundido: 0, fundidoDir: 0, fundidoVel: 0.06, fundidoAccion: null, enTransicion: false,
+  bloqueoInput: 0,
+  confeti: [],
+  rayo: 0,               // efecto de reaparición
+  astroPortada: { x: 200, dir: 1, y: 0, vy: 0, anim: 0 },
+  astroFinal: { y: 0, vy: 0, dir: 1 },
+  fugaces: []
+};
+
+function cargarProgreso() {
+  try {
+    const v = parseInt(localStorage.getItem(CONFIG.CLAVE_GUARDADO), 10);
+    if (!isNaN(v) && v >= 0 && v < NIVELES.length) estado.nivelGuardado = v;
+  } catch (e) { estado.nivelGuardado = 0; }
+}
+function guardarProgreso(n) {
+  estado.nivelGuardado = n;
+  try { localStorage.setItem(CONFIG.CLAVE_GUARDADO, String(n)); } catch (e) { /* sin almacenamiento: se juega igual */ }
+}
+
+// ===================== INPUT =====================
+const teclas = { izq: false, der: false, arr: false };
+const toque = { izq: false, der: false, arr: false };
+const punteros = new Map(); // pointerId → 'izq' | 'der' | 'arr' | null
+let saltoPulsado = false;   // flanco del salto (se consume en la física)
+
+// Botones táctiles en coordenadas lógicas
+const BOTONES = {
+  izq: { x: 50, y: 274, r: 26, zona: [0, 210, 86, 110] },
+  der: { x: 120, y: 274, r: 26, zona: [86, 210, 90, 110] },
+  arr: { x: 590, y: 274, r: 26, zona: [500, 200, 140, 120] }
+};
+
+function botonEn(x, y) {
+  for (const nombre in BOTONES) {
+    const z = BOTONES[nombre].zona;
+    if (x >= z[0] && x < z[0] + z[2] && y >= z[1] && y < z[1] + z[3]) return nombre;
+  }
+  return null;
+}
+function actualizarToque() {
+  toque.izq = toque.der = toque.arr = false;
+  for (const b of punteros.values()) if (b) toque[b] = true;
+}
+function coordenadasLogicas(e) {
+  const r = lienzoJuego.getBoundingClientRect();
+  return {
+    x: (e.clientX - r.left) / r.width * CONFIG.ANCHO,
+    y: (e.clientY - r.top) / r.height * CONFIG.ALTO
+  };
+}
+
+window.addEventListener('keydown', (e) => {
+  const mapa = { ArrowLeft: 'izq', ArrowRight: 'der', ArrowUp: 'arr' };
+  const t = mapa[e.key];
+  if (!t) return;
+  e.preventDefault();
+  Sonido.iniciar();
+  if (t === 'arr' && !teclas.arr && !e.repeat) saltoPulsado = true;
+  if (!teclas[t] && !e.repeat) alPulsarTecla(t);
+  teclas[t] = true;
+});
+window.addEventListener('keyup', (e) => {
+  const mapa = { ArrowLeft: 'izq', ArrowRight: 'der', ArrowUp: 'arr' };
+  const t = mapa[e.key];
+  if (!t) return;
+  e.preventDefault();
+  teclas[t] = false;
+});
+window.addEventListener('blur', () => {
+  teclas.izq = teclas.der = teclas.arr = false;
+  punteros.clear();
+  actualizarToque();
+});
+
+function alPunteroAbajo(e) {
+  e.preventDefault();
+  Sonido.iniciar();
+  lienzoJuego.focus({ preventScroll: true });
+  const p = coordenadasLogicas(e);
+  if (estado.pantalla === 'juego') {
+    const b = botonEn(p.x, p.y);
+    punteros.set(e.pointerId, b);
+    if (b === 'arr') saltoPulsado = true;
+    actualizarToque();
+    try { lienzoJuego.setPointerCapture(e.pointerId); } catch (err) { /* sin captura */ }
+  } else {
+    alTocarMenu(p.x, p.y);
+  }
+}
+function alPunteroMover(e) {
+  if (!punteros.has(e.pointerId)) return;
+  const p = coordenadasLogicas(e);
+  const b = botonEn(p.x, p.y);
+  if (b !== punteros.get(e.pointerId)) {
+    if (b === 'arr') saltoPulsado = true;
+    punteros.set(e.pointerId, b);
+    actualizarToque();
+  }
+}
+function alPunteroArriba(e) {
+  punteros.delete(e.pointerId);
+  actualizarToque();
+}
+
+// ===================== FÍSICA =====================
+function crearJugador(nivel) {
+  return {
+    x: nivel.inicio.x - CONFIG.JUG_W / 2,
+    y: nivel.inicio.y - CONFIG.JUG_H,
+    vx: 0, vy: 0,
+    enSuelo: true,
+    coyote: CONFIG.COYOTE,
+    bufferSalto: 0,
+    mira: 1,
+    anim: 0,
+    parpadeo: 0
+  };
+}
+
+// Avanza un cuadro de física. entrada = { izq, der, salto }.
+// Devuelve eventos para sonidos y partículas.
+function pasoFisica(j, entrada, plataformas) {
+  const C = CONFIG;
+  const ev = { salto: false, aterrizaje: false, impacto: 0 };
+
+  if (entrada.salto) j.bufferSalto = C.BUFFER_SALTO;
+
+  const dir = (entrada.der ? 1 : 0) - (entrada.izq ? 1 : 0);
+  if (dir !== 0) j.mira = dir;
+  const acel = j.enSuelo ? C.ACEL_SUELO : C.ACEL_AIRE;
+  j.vx += (dir * C.VEL_MAX - j.vx) * acel;
+  if (Math.abs(j.vx) < 0.05) j.vx = 0;
+
+  if (j.enSuelo) j.coyote = C.COYOTE;
+  else if (j.coyote > 0) j.coyote--;
+
+  if (j.bufferSalto > 0) {
+    if (j.coyote > 0) {
+      j.vy = C.SALTO;
+      j.coyote = 0;
+      j.bufferSalto = 0;
+      j.enSuelo = false;
+      ev.salto = true;
+    } else {
+      j.bufferSalto--;
+    }
+  }
+
+  j.vy = Math.min(j.vy + C.GRAVEDAD, C.CAIDA_MAX);
+
+  // Eje X primero, luego eje Y (resolución AABB separada por ejes)
+  j.x += j.vx;
+  colisionX(j, plataformas);
+
+  const estabaEnSuelo = j.enSuelo;
+  const vyAntes = j.vy;
+  colisionY(j, plataformas);
+  if (j.enSuelo && !estabaEnSuelo) {
+    ev.aterrizaje = true;
+    ev.impacto = vyAntes;
+  }
+  return ev;
+}
+
+// ===================== COLISIONES =====================
+function solapaX(j, p) {
+  return j.x + CONFIG.JUG_W > p[0] && j.x < p[0] + p[2];
+}
+
+// Choque lateral: solo con bloques de roca (los puentes delgados se atraviesan de lado).
+function colisionX(j, plataformas) {
+  const C = CONFIG;
+  for (const p of plataformas) {
+    if (p[3] <= C.ALTO_DELGADA) continue;
+    if (j.y + C.JUG_H <= p[1] || j.y >= p[1] + p[3]) continue;
+    if (!solapaX(j, p)) continue;
+    const centroJ = j.x + C.JUG_W / 2;
+    const centroP = p[0] + p[2] / 2;
+    if (j.vx > 0 || (j.vx === 0 && centroJ < centroP)) j.x = p[0] - C.JUG_W;
+    else j.x = p[0] + p[2];
+    j.vx = 0;
+  }
+  // Muros de la cueva
+  if (j.x < C.MURO) { j.x = C.MURO; j.vx = 0; }
+  if (j.x + C.JUG_W > C.ANCHO - C.MURO) { j.x = C.ANCHO - C.MURO - C.JUG_W; j.vx = 0; }
+}
+
+// Choque vertical: aterrizar sobre cualquier plataforma; golpear el techo solo en bloques sólidos.
+function colisionY(j, plataformas) {
+  const C = CONFIG;
+  const yAntes = j.y;
+  const yNueva = j.y + j.vy;
+  j.enSuelo = false;
+  let suelo = null;
+  let techo = null;
+  for (const p of plataformas) {
+    if (!solapaX(j, p)) continue;
+    if (j.vy >= 0) {
+      if (yAntes + C.JUG_H <= p[1] + 0.01 && yNueva + C.JUG_H >= p[1]) {
+        if (suelo === null || p[1] < suelo) suelo = p[1];
+      }
+    } else if (p[3] > C.ALTO_DELGADA) {
+      const base = p[1] + p[3];
+      if (yAntes >= base - 0.01 && yNueva < base) {
+        if (techo === null || base > techo) techo = base;
+      }
+    }
+  }
+  if (suelo !== null) {
+    j.y = suelo - C.JUG_H;
+    j.vy = 0;
+    j.enSuelo = true;
+  } else if (techo !== null) {
+    j.y = techo;
+    j.vy = 0;
+  } else {
+    j.y = yNueva;
+  }
+  if (j.y < -40) { j.y = -40; if (j.vy < 0) j.vy = 0; }
+}
+
+function tocaMeta(j, nivel) {
+  const m = nivel.meta;
+  const mx = m.x - 10, my = m.y - 44, mw = 20, mh = 44;
+  return j.x < mx + mw && j.x + CONFIG.JUG_W > mx && j.y < my + mh && j.y + CONFIG.JUG_H > my;
+}
+
+// ===================== AUDIO =====================
+const Sonido = {
+  ctx: null,
+  maestro: null,
+  bufferRuido: null,
+  iniciar() {
+    if (this.ctx) {
+      if (this.ctx.state === 'suspended') this.ctx.resume();
+      return;
+    }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    this.ctx = new AC();
+    this.maestro = this.ctx.createGain();
+    this.maestro.gain.value = 0.22;
+    this.maestro.connect(this.ctx.destination);
+    const largo = Math.floor(this.ctx.sampleRate * 0.5);
+    this.bufferRuido = this.ctx.createBuffer(1, largo, this.ctx.sampleRate);
+    const datos = this.bufferRuido.getChannelData(0);
+    for (let i = 0; i < largo; i++) datos[i] = Math.random() * 2 - 1;
+  },
+  tono(f1, f2, dur, tipo, vol, retraso) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime + (retraso || 0);
+    const o = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    o.type = tipo || 'square';
+    o.frequency.setValueAtTime(f1, t);
+    if (f2 !== f1) o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol || 0.3, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g);
+    g.connect(this.maestro);
+    o.start(t);
+    o.stop(t + dur + 0.03);
+  },
+  ruido(dur, vol, frec, retraso) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime + (retraso || 0);
+    const s = this.ctx.createBufferSource();
+    s.buffer = this.bufferRuido;
+    const f = this.ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = frec;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(f); f.connect(g); g.connect(this.maestro);
+    s.start(t);
+    s.stop(t + dur + 0.02);
+  },
+  salto() { this.tono(300, 700, 0.15, 'square', 0.28); },
+  aterrizaje() { this.ruido(0.09, 0.5, 700); this.tono(150, 70, 0.09, 'triangle', 0.35); },
+  caida() { this.tono(760, 90, 0.7, 'triangle', 0.45); this.tono(540, 70, 0.7, 'square', 0.1, 0.06); },
+  reaparecer() { this.tono(220, 880, 0.3, 'sine', 0.35); this.tono(440, 1320, 0.25, 'triangle', 0.15, 0.08); },
+  meta() {
+    [523, 659, 784, 1047].forEach((f, i) => this.tono(f, f, 0.16, 'square', 0.25, i * 0.08));
+    this.tono(1568, 2093, 0.45, 'sine', 0.25, 0.34);
+  },
+  victoria() {
+    const notas = [[523, 0.14], [659, 0.14], [784, 0.14], [1047, 0.28], [784, 0.14], [1047, 0.5], [1319, 0.6]];
+    let t = 0;
+    notas.forEach(([f, d]) => {
+      this.tono(f, f, d, 'square', 0.22, t);
+      this.tono(f / 2, f / 2, d, 'triangle', 0.25, t);
+      t += d * 0.95;
+    });
+    for (let i = 0; i < 6; i++) this.tono(2000 + i * 180, 2600 + i * 180, 0.12, 'sine', 0.08, t + i * 0.09);
+  },
+  clic() { this.tono(880, 1320, 0.08, 'square', 0.22); },
+  mover() { this.tono(660, 660, 0.05, 'square', 0.15); }
+};
+
+// ===================== RENDER =====================
+const lienzoJuego = document.getElementById('juego');
+const ctx = lienzoJuego.getContext('2d');
+let factorResolucion = 1;
+
+function crearLienzo(w, h) {
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.ceil(w));
+  c.height = Math.max(1, Math.ceil(h));
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  return [c, g];
+}
+
+// Generador aleatorio con semilla (para que cada nivel se dibuje siempre igual)
+function aleatorio(semilla) {
+  let s = (semilla >>> 0) || 123456789;
+  return () => {
+    s ^= s << 13; s >>>= 0;
+    s ^= s >>> 17;
+    s ^= s << 5; s >>>= 0;
+    return s / 4294967296;
+  };
+}
+
+// ---------- Fuente bitmap 5x7 (sin fuentes externas) ----------
+const GLIFOS = {
+  'A': ['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'],
+  'B': ['####.', '#...#', '#...#', '####.', '#...#', '#...#', '####.'],
+  'C': ['.###.', '#...#', '#....', '#....', '#....', '#...#', '.###.'],
+  'D': ['####.', '#...#', '#...#', '#...#', '#...#', '#...#', '####.'],
+  'E': ['#####', '#....', '#....', '####.', '#....', '#....', '#####'],
+  'F': ['#####', '#....', '#....', '####.', '#....', '#....', '#....'],
+  'G': ['.###.', '#...#', '#....', '#.###', '#...#', '#...#', '.####'],
+  'H': ['#...#', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'],
+  'I': ['#####', '..#..', '..#..', '..#..', '..#..', '..#..', '#####'],
+  'J': ['..###', '...#.', '...#.', '...#.', '#..#.', '#..#.', '.##..'],
+  'K': ['#...#', '#..#.', '#.#..', '##...', '#.#..', '#..#.', '#...#'],
+  'L': ['#....', '#....', '#....', '#....', '#....', '#....', '#####'],
+  'M': ['#...#', '##.##', '#.#.#', '#.#.#', '#...#', '#...#', '#...#'],
+  'N': ['#...#', '##..#', '#.#.#', '#..##', '#...#', '#...#', '#...#'],
+  'O': ['.###.', '#...#', '#...#', '#...#', '#...#', '#...#', '.###.'],
+  'P': ['####.', '#...#', '#...#', '####.', '#....', '#....', '#....'],
+  'Q': ['.###.', '#...#', '#...#', '#...#', '#.#.#', '#..#.', '.##.#'],
+  'R': ['####.', '#...#', '#...#', '####.', '#.#..', '#..#.', '#...#'],
+  'S': ['.####', '#....', '#....', '.###.', '....#', '....#', '####.'],
+  'T': ['#####', '..#..', '..#..', '..#..', '..#..', '..#..', '..#..'],
+  'U': ['#...#', '#...#', '#...#', '#...#', '#...#', '#...#', '.###.'],
+  'V': ['#...#', '#...#', '#...#', '#...#', '#...#', '.#.#.', '..#..'],
+  'W': ['#...#', '#...#', '#...#', '#.#.#', '#.#.#', '##.##', '#...#'],
+  'X': ['#...#', '#...#', '.#.#.', '..#..', '.#.#.', '#...#', '#...#'],
+  'Y': ['#...#', '#...#', '.#.#.', '..#..', '..#..', '..#..', '..#..'],
+  'Z': ['#####', '....#', '...#.', '..#..', '.#...', '#....', '#####'],
+  '0': ['.###.', '#...#', '#..##', '#.#.#', '##..#', '#...#', '.###.'],
+  '1': ['..#..', '.##..', '..#..', '..#..', '..#..', '..#..', '.###.'],
+  '2': ['.###.', '#...#', '....#', '...#.', '..#..', '.#...', '#####'],
+  '3': ['####.', '....#', '....#', '.###.', '....#', '....#', '####.'],
+  '4': ['...#.', '..##.', '.#.#.', '#..#.', '#####', '...#.', '...#.'],
+  '5': ['#####', '#....', '####.', '....#', '....#', '#...#', '.###.'],
+  '6': ['.###.', '#....', '#....', '####.', '#...#', '#...#', '.###.'],
+  '7': ['#####', '....#', '...#.', '..#..', '.#...', '.#...', '.#...'],
+  '8': ['.###.', '#...#', '#...#', '.###.', '#...#', '#...#', '.###.'],
+  '9': ['.###.', '#...#', '#...#', '.####', '....#', '....#', '.###.'],
+  '!': ['..#..', '..#..', '..#..', '..#..', '..#..', '.....', '..#..'],
+  '¡': ['..#..', '.....', '..#..', '..#..', '..#..', '..#..', '..#..'],
+  '?': ['.###.', '#...#', '....#', '...#.', '..#..', '.....', '..#..'],
+  '¿': ['..#..', '.....', '..#..', '.#...', '#....', '#...#', '.###.'],
+  ':': ['.....', '..#..', '..#..', '.....', '..#..', '..#..', '.....'],
+  '/': ['....#', '....#', '...#.', '..#..', '.#...', '#....', '#....'],
+  '.': ['.....', '.....', '.....', '.....', '.....', '.##..', '.##..'],
+  ',': ['.....', '.....', '.....', '.....', '.##..', '..#..', '.#...'],
+  '-': ['.....', '.....', '.....', '#####', '.....', '.....', '.....'],
+  "'": ['..#..', '..#..', '.#...', '.....', '.....', '.....', '.....'],
+  '←': ['.....', '..#..', '.#...', '#####', '.#...', '..#..', '.....'],
+  '→': ['.....', '..#..', '...#.', '#####', '...#.', '..#..', '.....'],
+  '↑': ['..#..', '.###.', '#.#.#', '..#..', '..#..', '..#..', '..#..'],
+  ' ': ['.....', '.....', '.....', '.....', '.....', '.....', '.....']
+};
+const ACENTOS = { 'Á': 'A', 'É': 'E', 'Í': 'I', 'Ó': 'O', 'Ú': 'U', 'Ñ': 'N' };
+const MARCA_AGUDA = ['...#.', '..#..'];
+const MARCA_TILDE = ['.##.#', '#..#.'];
+const pixelesGlifo = {};
+
+function obtenerPixeles(ch) {
+  if (pixelesGlifo[ch]) return pixelesGlifo[ch];
+  const lista = [];
+  const base = ACENTOS[ch] || ch;
+  const filas = GLIFOS[base] || GLIFOS[' '];
+  filas.forEach((fila, y) => {
+    for (let x = 0; x < 5; x++) if (fila[x] === '#') lista.push([x, y]);
+  });
+  if (ACENTOS[ch]) {
+    const marca = ch === 'Ñ' ? MARCA_TILDE : MARCA_AGUDA;
+    marca.forEach((fila, y) => {
+      for (let x = 0; x < 5; x++) if (fila[x] === '#') lista.push([x, y - 3]);
+    });
+  }
+  pixelesGlifo[ch] = lista;
+  return lista;
+}
+
+function anchoTexto(txt, s) {
+  return txt.length ? txt.length * 6 * s - s : 0;
+}
+
+const cacheTexto = new Map();
+// estilo: 'plano' | 'sombra' | 'titulo' (bloque blanco con borde negro, como la portada de referencia)
+function lienzoTexto(txt, s, color, estilo, borde, colorSombra) {
+  const clave = txt + '|' + s + '|' + color + '|' + estilo + '|' + borde + '|' + colorSombra;
+  if (cacheTexto.has(clave)) return cacheTexto.get(clave);
+  if (cacheTexto.size > 400) cacheTexto.clear();
+
+  const ancho = anchoTexto(txt, s);
+  const b = estilo === 'titulo' ? borde : 0;
+  const sb = estilo === 'titulo' ? Math.max(2, Math.round(borde * 0.9)) : (estilo === 'sombra' ? Math.max(1, Math.round(s / 2)) : 0);
+  const arriba = 3 * s;
+  const [c, g] = crearLienzo(ancho + 2 * b + sb, 10 * s + 2 * b + sb);
+
+  let capas;
+  if (estilo === 'titulo') {
+    capas = [
+      { dx: 0, dy: sb, e: b, col: colorSombra || PALETA.violeta },
+      { dx: 0, dy: 0, e: b, col: PALETA.tinta },
+      { dx: 0, dy: 0, e: 0, col: color }
+    ];
+  } else if (estilo === 'sombra') {
+    capas = [
+      { dx: sb, dy: sb, e: 0, col: PALETA.tinta },
+      { dx: 0, dy: 0, e: 0, col: color }
+    ];
+  } else {
+    capas = [{ dx: 0, dy: 0, e: 0, col: color }];
+  }
+
+  for (const capa of capas) {
+    g.fillStyle = capa.col;
+    for (let i = 0; i < txt.length; i++) {
+      const px0 = b + i * 6 * s;
+      for (const [x, y] of obtenerPixeles(txt[i])) {
+        g.fillRect(px0 + x * s - capa.e + capa.dx, b + arriba + y * s - capa.e + capa.dy, s + 2 * capa.e, s + 2 * capa.e);
+      }
+    }
+  }
+  // Brillo inferior suave en los títulos (la mitad baja de cada letra un poco lila)
+  if (estilo === 'titulo') {
+    g.globalCompositeOperation = 'source-atop';
+    g.fillStyle = 'rgba(185,150,255,0.25)';
+    g.fillRect(0, b + arriba + 5 * s, c.width, 2 * s);
+    g.globalCompositeOperation = 'source-over';
+  }
+  const res = { c, ox: b, oy: b + arriba, ancho };
+  cacheTexto.set(clave, res);
+  return res;
+}
+
+function dibujarTexto(txt, x, y, s, op) {
+  op = op || {};
+  const t = lienzoTexto(txt, s, op.color || PALETA.blanco, op.estilo || 'sombra', op.borde || Math.max(2, Math.round(s * 0.6)), op.sombra || PALETA.violeta);
+  let x0 = x;
+  if (op.alinear === 'centro') x0 = x - t.ancho / 2;
+  else if (op.alinear === 'derecha') x0 = x - t.ancho;
+  const alfa = op.alfa === undefined ? 1 : op.alfa;
+  if (alfa <= 0) return;
+  ctx.globalAlpha = alfa;
+  ctx.drawImage(t.c, Math.round(x0) - t.ox, Math.round(y) - t.oy);
+  ctx.globalAlpha = 1;
+}
+
+// ---------- Sprite del astronauta (12x16 píxeles, dibujado al doble) ----------
+const FILAS_CUERPO = [
+  '...lwwwwww..',
+  '.lwwwwwwwww.',
+  'lwwwwwwwwwww',
+  'lwwwwssssssw',
+  'lllwwskssksw',
+  'lllwwskssksw',
+  'lllwwssssssw',
+  'lwwwwzzzzzzw',
+  '.lwwwwwwwww.',
+  '..olwwwwwl..',
+  '.dolwwcwwwd.',
+  '.dolwwcwwwd.',
+  '...lwwowww..'
+];
+const FILAS_PIERNAS = {
+  quieto: ['...lww.lww..', '...ddd.ddd..', '...ddd.ddd..'],
+  paso:   ['..lww...lww.', '.ddd....ddd.', '.ddd....ddd.'],
+  cruce:  ['....lwww....', '....dddd....', '....dddd....'],
+  salto:  ['..lww..lww..', '.ddd....ddd.', '............']
+};
+const sprites = {};
+
+function crearSpriteAstro(piernas, espejo, parpadea) {
+  const filas = FILAS_CUERPO.concat(FILAS_PIERNAS[piernas]).map((f, i) => {
+    let fila = f;
+    if (parpadea && i === 4) fila = fila.replace(/k/g, 's');
+    return espejo ? fila.split('').reverse().join('') : fila;
+  });
+  const W = 12, H = 16;
+  const [c, g] = crearLienzo(W + 2, H + 2);
+  const lleno = (x, y) => x >= 0 && y >= 0 && x < W && y < H && filas[y][x] !== '.';
+  // Contorno oscuro automático para que se lea sobre cualquier fondo
+  g.fillStyle = PALETA.tinta;
+  for (let y = -1; y <= H; y++) {
+    for (let x = -1; x <= W; x++) {
+      if (lleno(x, y)) continue;
+      if (lleno(x - 1, y) || lleno(x + 1, y) || lleno(x, y - 1) || lleno(x, y + 1)) g.fillRect(x + 1, y + 1, 1, 1);
+    }
+  }
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const ch = filas[y][x];
+      if (ch === '.') continue;
+      g.fillStyle = COLORES_ASTRO[ch];
+      g.fillRect(x + 1, y + 1, 1, 1);
+    }
+  }
+  return c;
+}
+
+function prepararSprites() {
+  for (const p of Object.keys(FILAS_PIERNAS)) {
+    sprites[p] = { 1: crearSpriteAstro(p, false, false), '-1': crearSpriteAstro(p, true, false) };
+  }
+  sprites.parpadeo = { 1: crearSpriteAstro('quieto', false, true), '-1': crearSpriteAstro('quieto', true, true) };
+}
+
+// Dibuja al astronauta: (x, y) = esquina de la caja de colisión 16x28.
+function dibujarAstro(x, y, cuadro, mira, opciones) {
+  const img = sprites[cuadro][mira > 0 ? 1 : '-1'];
+  const o = opciones || {};
+  const ancho = 28, alto = 36;
+  const dx = Math.round(x + CONFIG.JUG_W / 2 - ancho / 2);
+  const dy = Math.round(y + CONFIG.JUG_H - 34 + (o.rebote || 0));
+  if (o.escala !== undefined || o.giro) {
+    ctx.save();
+    ctx.translate(dx + ancho / 2, dy + alto / 2);
+    ctx.rotate(o.giro || 0);
+    const e = o.escala === undefined ? 1 : o.escala;
+    ctx.scale(e, e);
+    ctx.globalAlpha = o.alfa === undefined ? 1 : o.alfa;
+    ctx.drawImage(img, -ancho / 2, -alto / 2, ancho, alto);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    return;
+  }
+  ctx.globalAlpha = o.alfa === undefined ? 1 : o.alfa;
+  ctx.drawImage(img, dx, dy, ancho, alto);
+  ctx.globalAlpha = 1;
+}
+
+function cuadroAstro(j) {
+  if (!j.enSuelo) return j.vy < 0 ? 'salto' : 'paso';
+  if (Math.abs(j.vx) > 0.4) return (Math.floor(j.anim / 9) % 2 === 0) ? 'paso' : 'cruce';
+  return (estado.tiempo % 200) < 8 ? 'parpadeo' : 'quieto';
+}
+
+// ---------- Roca con musgo de cristal (estilo bloque con borde de pasto de la referencia) ----------
+function dibujarRoca(g, x, y, w, h, r, musgo) {
+  g.fillStyle = PALETA.roca1;
+  g.fillRect(x, y, w, h);
+  for (let yy = y; yy < y + h; yy += 2) {
+    for (let xx = x; xx < x + w; xx += 2) {
+      const v = r();
+      if (v < 0.10) g.fillStyle = PALETA.roca2;
+      else if (v < 0.17) g.fillStyle = PALETA.roca3;
+      else if (v < 0.185) g.fillStyle = PALETA.rocaLuz;
+      else continue;
+      g.fillRect(xx, yy, 2, 2);
+    }
+  }
+  // Pequeños cristales incrustados
+  const nCrist = Math.floor((w * h) / 2600);
+  for (let i = 0; i < nCrist; i++) {
+    const cx = x + 6 + Math.floor(r() * Math.max(1, (w - 14) / 2)) * 2;
+    const cy = y + 12 + Math.floor(r() * Math.max(1, (h - 20) / 2)) * 2;
+    if (cy > y + h - 6) continue;
+    g.fillStyle = r() < 0.5 ? PALETA.violetaClaro : PALETA.cianMedio;
+    g.fillRect(cx, cy, 2, 4);
+    g.fillRect(cx - 2, cy + 2, 6, 2);
+    g.fillStyle = PALETA.blanco;
+    g.fillRect(cx, cy, 2, 2);
+  }
+  // Borde oscuro
+  g.fillStyle = PALETA.rocaSombra;
+  g.fillRect(x, y + h - 2, w, 2);
+  g.fillRect(x, y, 2, h);
+  g.fillRect(x + w - 2, y, 2, h);
+  if (!musgo) return;
+  // Musgo de cristal en los costados y abajo (fino)
+  for (let yy = y + 6; yy < y + h - 2; yy += 2) {
+    if (r() < 0.55) { g.fillStyle = PALETA.musgo3; g.fillRect(x, yy, 2 + (r() < 0.3 ? 2 : 0), 2); }
+    if (r() < 0.55) { g.fillStyle = PALETA.musgo3; g.fillRect(x + w - 2 - (r() < 0.3 ? 2 : 0), yy, 4, 2); }
+  }
+  for (let xx = x; xx < x + w; xx += 2) {
+    if (r() < 0.6) { g.fillStyle = PALETA.musgo3; g.fillRect(xx, y + h - 2, 2, 2 + (r() < 0.25 ? 2 : 0)); }
+  }
+  // Musgo grueso arriba
+  g.fillStyle = PALETA.musgo3;
+  g.fillRect(x, y, w, 6);
+  for (let xx = x; xx < x + w; xx += 2) {
+    const extra = Math.floor(r() * 4) * 2;
+    g.fillRect(xx, y + 6, 2, extra);
+  }
+  g.fillStyle = PALETA.musgo2;
+  g.fillRect(x, y, w, 4);
+  for (let xx = x; xx < x + w; xx += 2) if (r() < 0.45) g.fillRect(xx, y + 4, 2, 2);
+  g.fillStyle = PALETA.musgo1;
+  g.fillRect(x, y, w, 2);
+  for (let xx = x + 2; xx < x + w - 2; xx += 2) {
+    if (r() < 0.08) { g.fillStyle = PALETA.blanco; g.fillRect(xx, y + 2, 2, 2); }
+  }
+  // Puntas redondeadas
+  g.fillStyle = PALETA.musgo2;
+  g.fillRect(x - 2, y + 2, 2, 4);
+  g.fillRect(x + w, y + 2, 2, 4);
+}
+
+// Puente de metal de la estación (plataforma delgada)
+function dibujarPuente(g, x, y, w, h) {
+  g.fillStyle = PALETA.metal4;
+  g.fillRect(x, y, w, h);
+  g.fillStyle = PALETA.metal2;
+  g.fillRect(x + 2, y + 2, w - 4, h - 4);
+  g.fillStyle = PALETA.metal1;
+  g.fillRect(x, y, w, 2);
+  g.fillStyle = PALETA.metal3;
+  g.fillRect(x + 2, y + h - 4, w - 4, 2);
+  // Paneles y remaches
+  for (let xx = x + 8; xx < x + w - 4; xx += 12) {
+    g.fillStyle = PALETA.metal3;
+    g.fillRect(xx, y + 2, 2, h - 4);
+    g.fillStyle = PALETA.metal4;
+    g.fillRect(xx - 4, y + 4, 2, 2);
+  }
+  // Luces naranjas en los extremos
+  g.fillStyle = PALETA.naranja;
+  g.fillRect(x + 2, y + 4, 2, 2);
+  g.fillRect(x + w - 4, y + 4, 2, 2);
+  // Brillo de propulsores debajo
+  g.fillStyle = 'rgba(79,243,255,0.35)';
+  g.fillRect(x + 4, y + h, w - 8, 2);
+  g.fillStyle = 'rgba(79,243,255,0.15)';
+  g.fillRect(x + 8, y + h + 2, w - 16, 2);
+}
+
+// Muro lateral de la cueva con musgo en el borde interior
+function dibujarMuro(g, x, alto, ladoInterior, r) {
+  dibujarRoca(g, x, 0, CONFIG.MURO, alto, r, false);
+  for (let yy = 0; yy < alto; yy += 2) {
+    const largo = 2 + Math.floor(r() * 3) * 2;
+    g.fillStyle = PALETA.musgo3;
+    if (ladoInterior === 'der') g.fillRect(x + CONFIG.MURO - largo, yy, largo, 2);
+    else g.fillRect(x, yy, largo, 2);
+    if (r() < 0.5) {
+      g.fillStyle = PALETA.musgo2;
+      if (ladoInterior === 'der') g.fillRect(x + CONFIG.MURO - 2, yy, 2, 2);
+      else g.fillRect(x, yy, 2, 2);
+    }
+  }
+  // Racimos de cristales en el muro
+  for (let yy = 40 + Math.floor(r() * 60); yy < alto - 20; yy += 90 + Math.floor(r() * 80)) {
+    const cx = ladoInterior === 'der' ? x + 4 : x + 6;
+    g.fillStyle = r() < 0.5 ? PALETA.cianMedio : PALETA.violetaClaro;
+    g.fillRect(cx, yy, 4, 8);
+    g.fillRect(cx + 2, yy - 4, 2, 4);
+    g.fillRect(cx - 2, yy + 4, 2, 6);
+    g.fillStyle = PALETA.blanco;
+    g.fillRect(cx + 2, yy - 2, 2, 2);
+  }
+}
+
+// Canvas del nivel completo (se dibuja una sola vez al cargar)
+const cacheNivel = {};
+function lienzoNivel(i) {
+  if (cacheNivel[i]) return cacheNivel[i];
+  const nivel = NIVELES[i];
+  const extra = 64; // zona del abismo bajo el nivel
+  const altoTotal = nivel.alto + extra;
+  const [c, g] = crearLienzo(CONFIG.ANCHO, altoTotal);
+  const r = aleatorio(1000 + i * 7919);
+  for (const p of nivel.plataformas) {
+    if (p[3] <= CONFIG.ALTO_DELGADA) dibujarPuente(g, p[0], p[1], p[2], p[3]);
+    else {
+      // Las rocas que tocan el fondo se dibujan más largas: parecen hundirse en el abismo
+      const h = p[1] + p[3] >= nivel.alto ? altoTotal - p[1] : p[3];
+      dibujarRoca(g, p[0], p[1], p[2], h, r, true);
+    }
+  }
+  dibujarMuro(g, 0, altoTotal, 'der', r);
+  dibujarMuro(g, CONFIG.ANCHO - CONFIG.MURO, altoTotal, 'izq', r);
+  // Neblina oscura del abismo
+  const neblina = g.createLinearGradient(0, nivel.alto - 40, 0, altoTotal);
+  neblina.addColorStop(0, 'rgba(6,4,18,0)');
+  neblina.addColorStop(1, 'rgba(6,4,18,0.95)');
+  g.fillStyle = neblina;
+  g.fillRect(0, nivel.alto - 40, CONFIG.ANCHO, extra + 40);
+  cacheNivel[i] = c;
+  return c;
+}
+
+// ---------- Fondos espaciales ----------
+const fondos = {};
+
+function prepararFondos() {
+  // Estrellas (mosaico que se repite verticalmente)
+  {
+    const [c, g] = crearLienzo(640, 320);
+    const r = aleatorio(42);
+    for (let i = 0; i < 170; i++) {
+      const x = Math.floor(r() * 320) * 2, y = Math.floor(r() * 160) * 2;
+      const v = r();
+      g.fillStyle = v < 0.6 ? 'rgba(255,255,255,0.55)' : (v < 0.8 ? PALETA.cian : PALETA.lila);
+      g.fillRect(x, y, v < 0.85 ? 1 : 2, v < 0.85 ? 1 : 2);
+    }
+    fondos.estrellas = c;
+  }
+  // Estrellas que titilan (se dibujan en vivo)
+  {
+    const r = aleatorio(77);
+    fondos.titilan = [];
+    for (let i = 0; i < 26; i++) fondos.titilan.push({ x: Math.floor(r() * 300) * 2 + 20, y: Math.floor(r() * 150) * 2 + 10, f: r() * 6.28 });
+  }
+  // Nebulosas (nubes pixeladas violetas)
+  {
+    const [c, g] = crearLienzo(640, 320);
+    const r = aleatorio(99);
+    const nube = (cx, cy, rad, color) => {
+      g.fillStyle = color;
+      for (let k = 0; k < 7; k++) {
+        const ox = cx + (r() - 0.5) * rad * 2.4, oy = cy + (r() - 0.5) * rad * 0.8, rr = rad * (0.5 + r() * 0.6);
+        for (let yy = -rr; yy <= rr; yy += 4) {
+          for (let xx = -rr * 1.4; xx <= rr * 1.4; xx += 4) {
+            if ((xx * xx) / (1.96 * rr * rr) + (yy * yy) / (rr * rr) <= 1) {
+              for (const dy of [-320, 0, 320]) g.fillRect(Math.round((ox + xx) / 4) * 4, Math.round((oy + yy + dy) / 4) * 4, 4, 4);
+            }
+          }
+        }
+      }
+    };
+    nube(140, 70, 26, 'rgba(122,79,208,0.10)');
+    nube(470, 200, 34, 'rgba(79,243,255,0.06)');
+    nube(300, 280, 22, 'rgba(255,95,162,0.06)');
+    fondos.nebulosa = c;
+  }
+  // Siluetas lejanas de la cueva (paralaje)
+  {
+    const [c, g] = crearLienzo(640, 320);
+    const r = aleatorio(5);
+    g.fillStyle = 'rgba(38,26,84,0.75)';
+    for (let y = 0; y < 320; y += 4) {
+      const a = 2 * Math.PI * y / 320;
+      const izq = 50 + 22 * Math.sin(a * 2) + 12 * Math.sin(a * 3 + 1);
+      const der = 46 + 20 * Math.sin(a * 2 + 2) + 14 * Math.sin(a * 5 + 0.5);
+      g.fillRect(0, y, Math.round(izq / 4) * 4, 4);
+      g.fillRect(640 - Math.round(der / 4) * 4, y, Math.round(der / 4) * 4, 4);
+    }
+    // Asteroides flotando
+    for (let i = 0; i < 9; i++) {
+      const cx = 110 + r() * 420, cy = r() * 320, rad = 6 + r() * 12;
+      for (const dy of [-320, 0, 320]) {
+        for (let yy = -rad; yy <= rad; yy += 4) {
+          for (let xx = -rad; xx <= rad; xx += 4) {
+            if (xx * xx + yy * yy <= rad * rad) g.fillRect(Math.round((cx + xx) / 4) * 4, Math.round((cy + yy + dy) / 4) * 4, 4, 4);
+          }
+        }
+      }
+    }
+    fondos.cueva = c;
+  }
+  // Marco de roca para portada y felicitaciones (estilo marco de piedra con musgo)
+  fondos.marco = crearMarco(16, 11);
+  fondos.marcoJuego = crearMarco(6, 12);
+  // Paisaje de la portada: planeta, colinas y suelo
+  fondos.paisaje = crearPaisaje();
+  // Botones táctiles
+  fondos.boton = crearBoton(false);
+  fondos.botonPulsado = crearBoton(true);
+}
+
+function crearMarco(grosor, semilla) {
+  const [c, g] = crearLienzo(640, 320);
+  const r = aleatorio(semilla);
+  const G = grosor;
+  const bloque = (x, y, w, h) => {
+    g.fillStyle = PALETA.roca1;
+    g.fillRect(x, y, w, h);
+    for (let yy = y; yy < y + h; yy += 2) {
+      for (let xx = x; xx < x + w; xx += 2) {
+        const v = r();
+        if (v < 0.12) g.fillStyle = PALETA.roca2;
+        else if (v < 0.2) g.fillStyle = PALETA.roca3;
+        else if (v < 0.22) g.fillStyle = PALETA.rocaLuz;
+        else continue;
+        g.fillRect(xx, yy, 2, 2);
+      }
+    }
+  };
+  bloque(0, 0, 640, G);
+  bloque(0, 320 - G, 640, G);
+  bloque(0, 0, G, 320);
+  bloque(640 - G, 0, G, 320);
+  // Musgo de cristal en el borde interior
+  const musgo = (x, y, horizontal, haciaAdentro) => {
+    const largo = 2 + Math.floor(r() * 3) * 2;
+    g.fillStyle = r() < 0.7 ? PALETA.musgo3 : PALETA.musgo2;
+    if (horizontal) g.fillRect(x, haciaAdentro > 0 ? y : y - largo + 2, 2, largo);
+    else g.fillRect(haciaAdentro > 0 ? x : x - largo + 2, y, largo, 2);
+    if (r() < 0.06) { g.fillStyle = PALETA.musgo1; g.fillRect(x, y, 2, 2); }
+  };
+  for (let x = G - 4; x < 640 - G + 4; x += 2) {
+    musgo(x, G - 2, true, 1);
+    musgo(x, 320 - G, true, -1);
+  }
+  for (let y = G - 4; y < 320 - G + 4; y += 2) {
+    musgo(G - 2, y, false, 1);
+    musgo(640 - G, y, false, -1);
+  }
+  g.fillStyle = PALETA.rocaSombra;
+  g.fillRect(0, 0, 640, 2); g.fillRect(0, 318, 640, 2); g.fillRect(0, 0, 2, 320); g.fillRect(638, 0, 2, 320);
+  return c;
+}
+
+function crearPaisaje() {
+  const [c, g] = crearLienzo(640, 320);
+  const r = aleatorio(321);
+  // Planeta con anillo
+  const planeta = (cx, cy, rad) => {
+    const anillo = (frente) => {
+      for (let a = 0; a < Math.PI * 2; a += 0.02) {
+        const s = Math.sin(a);
+        if ((s > 0) !== frente) continue;
+        const px = cx + Math.cos(a) * rad * 1.9, py = cy + s * rad * 0.42 - Math.cos(a) * rad * 0.25;
+        g.fillStyle = Math.cos(a) > 0.3 ? '#ffd9a8' : PALETA.naranja;
+        g.fillRect(Math.round(px / 2) * 2, Math.round(py / 2) * 2, 2, 2);
+      }
+    };
+    anillo(false);
+    for (let yy = -rad; yy <= rad; yy += 2) {
+      for (let xx = -rad; xx <= rad; xx += 2) {
+        if (xx * xx + yy * yy > rad * rad) continue;
+        const luz = (-xx - yy) / (rad * 1.4);
+        const banda = Math.floor((yy + rad) / 6) % 2 === 0;
+        g.fillStyle = luz > 0.35 ? '#ffc07a' : (luz > -0.25 ? (banda ? PALETA.naranja : '#ef7a1a') : PALETA.naranjaOscuro);
+        g.fillRect(cx + xx, cy + yy, 2, 2);
+      }
+    }
+    anillo(true);
+  };
+  planeta(96, 84, 22);
+  // Luna pequeña
+  for (let yy = -8; yy <= 8; yy += 2) for (let xx = -8; xx <= 8; xx += 2) {
+    if (xx * xx + yy * yy > 64) continue;
+    g.fillStyle = (xx + yy < -4) ? '#e8e2ff' : '#a89ad6';
+    g.fillRect(552 + xx, 58 + yy, 2, 2);
+  }
+  // Colinas lejanas (violeta)
+  for (let x = 0; x < 640; x += 4) {
+    const h = 232 + Math.round((14 * Math.sin(x / 47) + 9 * Math.sin(x / 19 + 1)) / 4) * 4;
+    g.fillStyle = '#3b2f7a';
+    g.fillRect(x, h, 4, 320 - h);
+    g.fillStyle = '#5a48a8';
+    g.fillRect(x, h, 4, 4);
+  }
+  // Colinas cercanas (turquesa alienígena)
+  for (let x = 0; x < 640; x += 4) {
+    const h = 256 + Math.round((10 * Math.sin(x / 33 + 2) + 6 * Math.sin(x / 13)) / 4) * 4;
+    g.fillStyle = '#1d5a72';
+    g.fillRect(x, h, 4, 320 - h);
+    g.fillStyle = '#2b8c9a';
+    g.fillRect(x, h, 4, 4);
+  }
+  // Cráteres
+  for (let i = 0; i < 7; i++) {
+    const cx = 40 + Math.floor(r() * 140) * 4, cy = 268 + Math.floor(r() * 4) * 4, w = 12 + Math.floor(r() * 3) * 4;
+    g.fillStyle = '#164a60';
+    g.fillRect(cx, cy, w, 4);
+    g.fillStyle = '#2b8c9a';
+    g.fillRect(cx, cy + 4, w, 2);
+  }
+  // Suelo donde camina el astronauta
+  dibujarRoca(g, 0, 288, 640, 32, r, true);
+  return c;
+}
+
+function crearBoton(pulsado) {
+  const [c, g] = crearLienzo(56, 56);
+  for (let y = 0; y < 56; y += 2) {
+    for (let x = 0; x < 56; x += 2) {
+      const d = Math.hypot(x + 1 - 28, y + 1 - 28);
+      if (d > 26) continue;
+      if (d > 23) g.fillStyle = pulsado ? PALETA.cian : 'rgba(255,255,255,0.75)';
+      else g.fillStyle = pulsado ? 'rgba(79,243,255,0.55)' : 'rgba(20,16,56,0.55)';
+      g.fillRect(x, y, 2, 2);
+    }
+  }
+  return c;
+}
+
+function dibujarFondoEspacial(colores, desplazamiento) {
+  const gr = ctx.createLinearGradient(0, 0, 0, 320);
+  gr.addColorStop(0, colores[0]);
+  gr.addColorStop(1, colores[1]);
+  ctx.fillStyle = gr;
+  ctx.fillRect(0, 0, 640, 320);
+  const capa = (img, factor) => {
+    const off = ((Math.round(desplazamiento * factor) % 320) + 320) % 320;
+    ctx.drawImage(img, 0, -off);
+    ctx.drawImage(img, 0, 320 - off);
+  };
+  capa(fondos.nebulosa, 0.1);
+  capa(fondos.estrellas, 0.2);
+  const t = estado.tiempo / 30;
+  const offE = ((Math.round(desplazamiento * 0.2) % 320) + 320) % 320;
+  for (const s of fondos.titilan) {
+    const a = 0.5 + 0.5 * Math.sin(t + s.f);
+    if (a < 0.35) continue;
+    let y = s.y - offE;
+    if (y < 0) y += 320;
+    ctx.globalAlpha = a;
+    ctx.fillStyle = PALETA.estrella;
+    ctx.fillRect(s.x, y - 2, 2, 6);
+    ctx.fillRect(s.x - 2, y, 6, 2);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ---------- Portal de meta ----------
+function dibujarPortal(x, y) {
+  const t = estado.tiempo;
+  const cx = x, cy = y - 24;
+  // Resplandor
+  const pulso = 0.5 + 0.5 * Math.sin(t * 0.08);
+  ctx.fillStyle = `rgba(79,243,255,${0.10 + 0.08 * pulso})`;
+  ctx.fillRect(cx - 24, cy - 32, 48, 64);
+  ctx.fillStyle = `rgba(185,150,255,${0.16 + 0.08 * pulso})`;
+  ctx.fillRect(cx - 20, cy - 28, 40, 56);
+  // Interior
+  for (let yy = -18; yy <= 18; yy += 2) {
+    for (let xx = -12; xx <= 12; xx += 2) {
+      const d = (xx * xx) / 144 + (yy * yy) / 324;
+      if (d > 1) continue;
+      const onda = Math.sin(d * 9 - t * 0.15);
+      ctx.fillStyle = onda > 0.3 ? '#9a6bff' : (onda > -0.4 ? '#5a34c8' : '#2f88c8');
+      ctx.fillRect(cx + xx - 1, cy + yy - 1, 2, 2);
+    }
+  }
+  // Anillo giratorio
+  for (let i = 0; i < 32; i++) {
+    const a = (i / 32) * Math.PI * 2 + t * 0.05;
+    const px = cx + Math.cos(a) * 15, py = cy + Math.sin(a) * 22;
+    ctx.fillStyle = i % 4 === 0 ? PALETA.blanco : (i % 2 ? PALETA.cian : PALETA.lila);
+    ctx.fillRect(Math.round(px) - 1, Math.round(py) - 1, 3, 3);
+  }
+  // Estrella central
+  const p = 2 + Math.round(1.5 + 1.5 * Math.sin(t * 0.12));
+  ctx.fillStyle = PALETA.amarillo;
+  ctx.fillRect(cx - 1, cy - 1 - p * 2, 2, 2 + p * 4);
+  ctx.fillRect(cx - 1 - p * 2, cy - 1, 2 + p * 4, 2);
+  ctx.fillStyle = PALETA.blanco;
+  ctx.fillRect(cx - 2, cy - 2, 4, 4);
+  // Base del portal
+  ctx.fillStyle = PALETA.metal4;
+  ctx.fillRect(cx - 14, y - 4, 28, 4);
+  ctx.fillStyle = PALETA.metal2;
+  ctx.fillRect(cx - 12, y - 4, 24, 2);
+  ctx.fillStyle = (Math.floor(t / 15) % 2) ? PALETA.cian : PALETA.naranja;
+  ctx.fillRect(cx - 10, y - 2, 2, 2);
+  ctx.fillRect(cx + 8, y - 2, 2, 2);
+}
+
+// ---------- Partículas ----------
+function crearParticulas(x, y, n, colores, fuerza, gravedad) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const v = (0.4 + Math.random()) * fuerza;
+    estado.particulas.push({
+      x, y,
+      vx: Math.cos(a) * v,
+      vy: Math.sin(a) * v - (gravedad ? 1 : 0),
+      vida: 30 + Math.random() * 25,
+      max: 55,
+      color: colores[Math.floor(Math.random() * colores.length)],
+      tam: Math.random() < 0.3 ? 3 : 2,
+      grav: gravedad || 0
+    });
+  }
+}
+function polvo(x, y) {
+  for (let i = 0; i < 6; i++) {
+    estado.particulas.push({
+      x: x + (Math.random() - 0.5) * 12, y,
+      vx: (Math.random() - 0.5) * 1.6, vy: -Math.random() * 0.8,
+      vida: 18 + Math.random() * 10, max: 28,
+      color: Math.random() < 0.5 ? '#9aa3c4' : '#d3d8ea', tam: 2, grav: 0.02
+    });
+  }
+}
+function actualizarParticulas() {
+  const ps = estado.particulas;
+  for (let i = ps.length - 1; i >= 0; i--) {
+    const p = ps[i];
+    p.x += p.vx; p.y += p.vy; p.vy += p.grav;
+    p.vx *= 0.97;
+    if (--p.vida <= 0) ps.splice(i, 1);
+  }
+}
+function dibujarParticulas() {
+  for (const p of estado.particulas) {
+    ctx.globalAlpha = Math.max(0, Math.min(1, p.vida / 20));
+    ctx.fillStyle = p.color;
+    ctx.fillRect(Math.round(p.x), Math.round(p.y), p.tam, p.tam);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ===================== UI =====================
+// Áreas táctiles de los menús (coordenadas lógicas)
+const ZONAS = {
+  jugar: [240, 170, 160, 40],
+  reiniciar: [20, 246, 130, 46],
+  otraVez: [170, 190, 300, 42]
+};
+function dentro(x, y, z) { return x >= z[0] && x < z[0] + z[2] && y >= z[1] && y < z[1] + z[3]; }
+
+function alPulsarTecla(t) {
+  if (estado.enTransicion || estado.bloqueoInput > 0) return;
+  if (estado.pantalla === 'portada') {
+    if (t === 'izq' || t === 'der') {
+      estado.menuSel = estado.menuSel === 0 ? 1 : 0;
+      Sonido.mover();
+    } else if (t === 'arr') {
+      if (estado.menuSel === 0) empezarJuego(); else reiniciarNiveles();
+    }
+  } else if (estado.pantalla === 'final') {
+    if (t === 'arr') jugarOtraVez();
+  }
+}
+
+function alTocarMenu(x, y) {
+  if (estado.enTransicion || estado.bloqueoInput > 0) return;
+  if (estado.pantalla === 'portada') {
+    if (dentro(x, y, ZONAS.jugar)) { estado.menuSel = 0; empezarJuego(); }
+    else if (dentro(x, y, ZONAS.reiniciar)) { estado.menuSel = 1; reiniciarNiveles(); }
+  } else if (estado.pantalla === 'final') {
+    if (dentro(x, y, ZONAS.otraVez)) jugarOtraVez();
+  }
+}
+
+function transicion(accion, vel) {
+  if (estado.enTransicion) return;
+  estado.enTransicion = true;
+  estado.fundidoDir = 1;
+  estado.fundidoVel = vel || 0.06;
+  estado.fundidoAccion = accion;
+}
+function actualizarFundido() {
+  if (estado.fundidoDir === 1) {
+    estado.fundido += estado.fundidoVel;
+    if (estado.fundido >= 1) {
+      estado.fundido = 1;
+      const a = estado.fundidoAccion;
+      estado.fundidoAccion = null;
+      if (a) a();
+      estado.fundidoDir = -1;
+    }
+  } else if (estado.fundidoDir === -1) {
+    estado.fundido -= estado.fundidoVel;
+    if (estado.fundido <= 0) {
+      estado.fundido = 0;
+      estado.fundidoDir = 0;
+      estado.enTransicion = false;
+    }
+  }
+}
+
+function empezarJuego() {
+  Sonido.clic();
+  transicion(() => {
+    estado.pantalla = 'juego';
+    cargarNivel(estado.nivelGuardado);
+  });
+}
+function reiniciarNiveles() {
+  Sonido.clic();
+  guardarProgreso(0);
+  estado.aviso = 'LEVELS RESET!';
+  estado.avisoT = 100;
+}
+function jugarOtraVez() {
+  Sonido.clic();
+  transicion(() => {
+    estado.pantalla = 'juego';
+    cargarNivel(0);
+  });
+}
+
+function objetivoCamara(nivel, j) {
+  const t = j.y + CONFIG.JUG_H / 2 - 150;
+  return Math.max(0, Math.min(nivel.alto - CONFIG.ALTO + CONFIG.MARGEN_CAMARA, t));
+}
+
+function cargarNivel(i) {
+  estado.nivel = i;
+  const nivel = NIVELES[i];
+  estado.jugador = crearJugador(nivel);
+  estado.camY = objetivoCamara(nivel, estado.jugador);
+  estado.fase = 'jugando';
+  estado.timerFase = 0;
+  estado.tNivel = 0;
+  estado.particulas = [];
+  estado.aviso = '';
+  estado.avisoT = 0;
+  estado.rayo = 30;
+  punteros.clear();
+  actualizarToque();
+  lienzoNivel(i);
+  guardarProgreso(i);
+}
+
+function reaparecer() {
+  const nivel = NIVELES[estado.nivel];
+  estado.jugador = crearJugador(nivel);
+  estado.camY = objetivoCamara(nivel, estado.jugador);
+  estado.fase = 'jugando';
+  estado.rayo = 30;
+  estado.aviso = 'OOPS! BACK TO THE START';
+  estado.avisoT = 110;
+  Sonido.reaparecer();
+  crearParticulas(nivel.inicio.x, nivel.inicio.y - 14, 18, [PALETA.cian, PALETA.blanco, PALETA.lila], 1.6, 0);
+}
+
+function irFinal() {
+  estado.pantalla = 'final';
+  estado.bloqueoInput = 70;
+  estado.particulas = [];
+  guardarProgreso(0);
+  estado.confeti = [];
+  for (let i = 0; i < 110; i++) estado.confeti.push(nuevoConfeti(true));
+  estado.astroFinal = { y: 0, vy: 0, dir: 1 };
+  Sonido.victoria();
+}
+function nuevoConfeti(alInicio) {
+  return {
+    x: 20 + Math.random() * 600,
+    y: alInicio ? Math.random() * 320 - 320 : -10 - Math.random() * 40,
+    vy: 0.6 + Math.random() * 1.2,
+    fase: Math.random() * 6.28,
+    giro: 0.05 + Math.random() * 0.12,
+    color: COLORES_CONFETI[Math.floor(Math.random() * COLORES_CONFETI.length)]
+  };
+}
+
+// ---------- Actualización por pantalla ----------
+function actualizarJuego() {
+  const nivel = NIVELES[estado.nivel];
+  const j = estado.jugador;
+  estado.tNivel++;
+  if (estado.rayo > 0) estado.rayo--;
+
+  if (estado.fase === 'jugando') {
+    const entrada = {
+      izq: teclas.izq || toque.izq,
+      der: teclas.der || toque.der,
+      salto: saltoPulsado
+    };
+    const ev = pasoFisica(j, entrada, nivel.plataformas);
+    if (j.enSuelo) j.anim += Math.abs(j.vx);
+    if (ev.salto) { Sonido.salto(); polvo(j.x + CONFIG.JUG_W / 2, j.y + CONFIG.JUG_H); }
+    if (ev.aterrizaje && ev.impacto > 3) { Sonido.aterrizaje(); polvo(j.x + CONFIG.JUG_W / 2, j.y + CONFIG.JUG_H); }
+
+    if (j.y > nivel.alto + CONFIG.MARGEN_VACIO) {
+      estado.fase = 'cayendo';
+      Sonido.caida();
+      transicion(reaparecer, 0.08);
+    } else if (tocaMeta(j, nivel)) {
+      estado.fase = 'portal';
+      estado.timerFase = 0;
+      j.vx = 0; j.vy = 0;
+      j.inicioX = j.x; j.inicioY = j.y;
+      Sonido.meta();
+      crearParticulas(nivel.meta.x, nivel.meta.y - 24, 30, [PALETA.amarillo, PALETA.cian, PALETA.blanco, PALETA.lila], 2.4, 0);
+    }
+  } else if (estado.fase === 'portal') {
+    estado.timerFase++;
+    const t = Math.min(1, estado.timerFase / 45);
+    j.x = j.inicioX + (nivel.meta.x - CONFIG.JUG_W / 2 - j.inicioX) * t;
+    j.y = j.inicioY + (nivel.meta.y - 24 - CONFIG.JUG_H / 2 - j.inicioY) * t;
+    if (estado.timerFase % 6 === 0) crearParticulas(nivel.meta.x, nivel.meta.y - 24, 4, [PALETA.amarillo, PALETA.blanco], 1.5, 0);
+    if (estado.timerFase === 90) {
+      if (estado.nivel >= NIVELES.length - 1) transicion(irFinal, 0.04);
+      else transicion(() => cargarNivel(estado.nivel + 1), 0.05);
+    }
+  }
+
+  if (estado.tiempo % 10 === 0) {
+    const m = nivel.meta;
+    estado.particulas.push({ x: m.x + (Math.random() - 0.5) * 30, y: m.y - 24 + (Math.random() - 0.5) * 40, vx: 0, vy: -0.4, vida: 40, max: 40, color: Math.random() < 0.5 ? PALETA.amarillo : PALETA.cian, tam: 2, grav: 0 });
+  }
+
+  // Cámara vertical que sigue al jugador
+  if (estado.fase !== 'cayendo') {
+    const objetivo = objetivoCamara(nivel, j);
+    estado.camY += (objetivo - estado.camY) * 0.12;
+  }
+}
+
+function actualizarPortada() {
+  const a = estado.astroPortada;
+  a.x += a.dir * 0.9;
+  a.anim += 0.9;
+  if (a.x > 560) { a.x = 560; a.dir = -1; }
+  if (a.x < 170) { a.x = 170; a.dir = 1; }
+  if (a.y === 0 && a.vy === 0 && Math.random() < 0.006) a.vy = -5;
+  if (a.vy !== 0 || a.y < 0) {
+    a.vy += 0.3;
+    a.y += a.vy;
+    if (a.y >= 0) { a.y = 0; a.vy = 0; }
+  }
+  // Estrellas fugaces
+  if (Math.random() < 0.01 && estado.fugaces.length < 2) {
+    estado.fugaces.push({ x: 120 + Math.random() * 400, y: 24 + Math.random() * 60, vida: 40 });
+  }
+  for (let i = estado.fugaces.length - 1; i >= 0; i--) {
+    const f = estado.fugaces[i];
+    f.x += 4; f.y += 1.6;
+    if (--f.vida <= 0) estado.fugaces.splice(i, 1);
+  }
+}
+
+function actualizarFinal() {
+  for (const c of estado.confeti) {
+    c.y += c.vy;
+    c.fase += c.giro;
+    c.x += Math.sin(c.fase) * 0.5;
+    if (c.y > 330) Object.assign(c, nuevoConfeti(false));
+  }
+  const a = estado.astroFinal;
+  if (a.y === 0 && a.vy === 0) { a.vy = -3.4; a.dir = -a.dir; }
+  a.vy += 0.32;
+  a.y += a.vy;
+  if (a.y >= 0) { a.y = 0; a.vy = 0; crearParticulas(320, 288, 3, [PALETA.amarillo, PALETA.cian], 1.2, 0.05); }
+  if (estado.tiempo % 20 === 0) {
+    crearParticulas(60 + Math.random() * 520, 40 + Math.random() * 120, 8, COLORES_CONFETI, 1.4, 0.03);
+  }
+}
+
+// ---------- Dibujo por pantalla ----------
+function dibujarJuego() {
+  const nivel = NIVELES[estado.nivel];
+  const j = estado.jugador;
+  const cam = Math.round(estado.camY);
+
+  dibujarFondoEspacial(nivel.cielo, cam);
+  {
+    const off = ((Math.round(cam * 0.45) % 320) + 320) % 320;
+    ctx.drawImage(fondos.cueva, 0, -off);
+    ctx.drawImage(fondos.cueva, 0, 320 - off);
+  }
+  ctx.drawImage(lienzoNivel(estado.nivel), 0, -cam);
+
+  ctx.save();
+  ctx.translate(0, -cam);
+  dibujarPortal(nivel.meta.x, nivel.meta.y);
+
+  // Rayo de reaparición
+  if (estado.rayo > 0) {
+    const a = estado.rayo / 30;
+    ctx.fillStyle = `rgba(79,243,255,${0.35 * a})`;
+    ctx.fillRect(nivel.inicio.x - 12, nivel.inicio.y - 120, 24, 120);
+    ctx.fillStyle = `rgba(255,255,255,${0.5 * a})`;
+    ctx.fillRect(nivel.inicio.x - 4, nivel.inicio.y - 120, 8, 120);
+  }
+
+  if (estado.fase === 'portal') {
+    const t = Math.min(1, estado.timerFase / 45);
+    if (estado.timerFase < 60) {
+      dibujarAstro(j.x, j.y, 'salto', j.mira, { escala: 1 - t * 0.85, giro: t * 8, alfa: 1 - Math.max(0, t - 0.8) * 5 });
+    }
+  } else if (estado.fase !== 'cayendo' || j.y < nivel.alto + 40) {
+    const parpadea = estado.rayo > 0 && Math.floor(estado.rayo / 3) % 2 === 0;
+    if (!parpadea) dibujarAstro(j.x, j.y, cuadroAstro(j), j.mira, { rebote: cuadroAstro(j) === 'cruce' ? -2 : 0 });
+  }
+  dibujarParticulas();
+  ctx.restore();
+
+  ctx.drawImage(fondos.marcoJuego, 0, 0);
+
+  // HUD
+  const textoNivel = 'LEVEL ' + (estado.nivel + 1) + ' / ' + NIVELES.length;
+  const anchoHUD = anchoTexto(textoNivel, 2) + 16;
+  ctx.fillStyle = 'rgba(12,8,32,0.7)';
+  ctx.fillRect(12, 10, anchoHUD, 24);
+  ctx.fillStyle = PALETA.cianOscuro;
+  ctx.fillRect(12, 32, anchoHUD, 2);
+  dibujarTexto(textoNivel, 20, 15, 2, { color: PALETA.blanco });
+
+  // Cartel de inicio de nivel
+  const tn = estado.tNivel;
+  if (tn < 150) {
+    const alfa = Math.min(1, tn / 15, (150 - tn) / 25);
+    ctx.globalAlpha = alfa * 0.75;
+    ctx.fillStyle = PALETA.tinta;
+    ctx.fillRect(0, 96, 640, 64);
+    ctx.globalAlpha = 1;
+    dibujarTexto('LEVEL ' + (estado.nivel + 1), 320, 104, 4, { alinear: 'centro', estilo: 'titulo', borde: 2, alfa });
+    dibujarTexto(nivel.nombre, 320, 140, 2, { alinear: 'centro', color: PALETA.cian, alfa });
+  }
+  // Pista del nivel
+  if (tn > 40 && tn < 560) {
+    const alfa = Math.min(1, (tn - 40) / 20, (560 - tn) / 40);
+    const ancho = anchoTexto(nivel.pista, 2) + 20;
+    ctx.globalAlpha = alfa * 0.7;
+    ctx.fillStyle = PALETA.tinta;
+    ctx.fillRect(320 - ancho / 2, 40, ancho, 24);
+    ctx.globalAlpha = 1;
+    dibujarTexto(nivel.pista, 320, 45, 2, { alinear: 'centro', color: PALETA.amarillo, alfa });
+  }
+  // Avisos
+  if (estado.avisoT > 0) {
+    estado.avisoT--;
+    const alfa = Math.min(1, estado.avisoT / 20);
+    dibujarTexto(estado.aviso, 320, 180, 2, { alinear: 'centro', color: PALETA.blanco, alfa });
+  }
+  if (estado.fase === 'portal' && estado.timerFase > 20) {
+    const alfa = Math.min(1, (estado.timerFase - 20) / 12);
+    dibujarTexto('LEVEL COMPLETE!', 320, 120, 4, { alinear: 'centro', estilo: 'titulo', borde: 2, sombra: PALETA.cianOscuro, alfa });
+  }
+
+  // Botones táctiles (← → ↑)
+  dibujarBoton(BOTONES.izq, '←', toque.izq || teclas.izq);
+  dibujarBoton(BOTONES.der, '→', toque.der || teclas.der);
+  dibujarBoton(BOTONES.arr, '↑', toque.arr || teclas.arr);
+}
+
+function dibujarBoton(b, flecha, pulsado) {
+  ctx.globalAlpha = pulsado ? 0.95 : 0.7;
+  ctx.drawImage(pulsado ? fondos.botonPulsado : fondos.boton, b.x - 28, b.y - 28);
+  ctx.globalAlpha = 1;
+  dibujarTexto(flecha, b.x + 1, b.y - 14, 4, { alinear: 'centro', color: PALETA.blanco, alfa: pulsado ? 1 : 0.9 });
+}
+
+function dibujarPortada() {
+  dibujarFondoEspacial(['#3a2a8a', '#0d0b2e'], 0);
+  // Franja clara arriba (como el cielo de la referencia)
+  ctx.fillStyle = 'rgba(185,150,255,0.18)';
+  ctx.fillRect(0, 16, 640, 14);
+  ctx.fillStyle = 'rgba(185,150,255,0.09)';
+  ctx.fillRect(0, 30, 640, 8);
+  // Nebulosas que se mueven despacio
+  const off = (estado.tiempo * 0.15) % 640;
+  ctx.drawImage(fondos.nebulosa, off, 0);
+  ctx.drawImage(fondos.nebulosa, off - 640, 0);
+  for (const f of estado.fugaces) {
+    ctx.globalAlpha = f.vida / 40;
+    ctx.fillStyle = PALETA.blanco;
+    ctx.fillRect(Math.round(f.x), Math.round(f.y), 4, 2);
+    ctx.fillStyle = PALETA.lila;
+    ctx.fillRect(Math.round(f.x) - 10, Math.round(f.y) - 4, 8, 2);
+    ctx.fillRect(Math.round(f.x) - 18, Math.round(f.y) - 7, 6, 2);
+    ctx.globalAlpha = 1;
+  }
+  ctx.drawImage(fondos.paisaje, 0, 0);
+
+  // Título
+  const flota = Math.round(Math.sin(estado.tiempo / 40) * 2);
+  dibujarTexto('ASTRO', 320, 34 + flota, 9, { alinear: 'centro', estilo: 'titulo', borde: 4, sombra: PALETA.violeta });
+  dibujarTexto('SPACE CAVE', 320, 110, 4, { alinear: 'centro', estilo: 'titulo', borde: 3, sombra: PALETA.violeta });
+  dibujarTexto('A SPACE ADVENTURE', 320, 148, 2, { alinear: 'centro', color: PALETA.cian });
+
+  // Menú
+  const selJugar = estado.menuSel === 0;
+  const parp = Math.floor(estado.tiempo / 20) % 2 === 0;
+  dibujarTexto('PLAY', 320, 180, 4, { alinear: 'centro', estilo: 'titulo', borde: 2, sombra: selJugar ? PALETA.naranjaOscuro : PALETA.violeta, color: selJugar ? PALETA.blanco : '#c9c3e8' });
+  if (selJugar && parp) {
+    dibujarTexto('→', 230, 182, 4, { color: PALETA.amarillo });
+    dibujarTexto('←', 390, 182, 4, { color: PALETA.amarillo });
+  }
+  const textoNivel = 'LEVEL: ' + String(estado.nivelGuardado + 1).padStart(2, '0') + '/' + String(NIVELES.length).padStart(2, '0');
+  dibujarTexto(textoNivel, 320, 218, 2, { alinear: 'centro', color: PALETA.blanco });
+  dibujarTexto('← → CHOOSE    ↑ CONFIRM', 320, 236, 1, { alinear: 'centro', color: PALETA.lila });
+
+  // Reiniciar niveles (abajo a la izquierda, como en la referencia)
+  const selReset = estado.menuSel === 1;
+  const colorReset = selReset ? PALETA.amarillo : PALETA.blanco;
+  dibujarTexto('RESET', 30, 256, 2, { color: colorReset });
+  dibujarTexto('LEVELS', 30, 272, 2, { color: colorReset });
+  if (selReset && parp) dibujarTexto('↑', 132, 266, 2, { color: PALETA.amarillo });
+
+  // Créditos
+  dibujarTexto('MADE BY CREATIVOS DIGITALES', 612, 276, 1, { alinear: 'derecha', color: '#9fd8e0' });
+
+  // Astronauta caminando en la base
+  const a = estado.astroPortada;
+  const cuadro = a.y < 0 ? 'salto' : (Math.floor(a.anim / 9) % 2 === 0 ? 'paso' : 'cruce');
+  dibujarAstro(a.x - 8, 288 - CONFIG.JUG_H + a.y, cuadro, a.dir, { rebote: cuadro === 'cruce' ? -2 : 0 });
+
+  ctx.drawImage(fondos.marco, 0, 0);
+
+  if (estado.avisoT > 0) {
+    estado.avisoT--;
+    const alfa = Math.min(1, estado.avisoT / 20);
+    ctx.globalAlpha = alfa * 0.8;
+    ctx.fillStyle = PALETA.tinta;
+    ctx.fillRect(170, 150, 300, 26);
+    ctx.globalAlpha = 1;
+    dibujarTexto(estado.aviso, 320, 156, 2, { alinear: 'centro', color: PALETA.amarillo, alfa });
+  }
+}
+
+function dibujarEstrellaGrande(cx, cy, tam, t) {
+  const p = tam + Math.round(Math.sin(t) * 2);
+  ctx.fillStyle = PALETA.naranjaOscuro;
+  ctx.fillRect(cx - 4, cy - p - 2, 8, p * 2 + 4);
+  ctx.fillRect(cx - p - 2, cy - 4, p * 2 + 4, 8);
+  ctx.fillStyle = PALETA.amarillo;
+  ctx.fillRect(cx - 2, cy - p, 4, p * 2);
+  ctx.fillRect(cx - p, cy - 2, p * 2, 4);
+  ctx.fillRect(cx - 6, cy - 6, 12, 12);
+  ctx.fillStyle = PALETA.blanco;
+  ctx.fillRect(cx - 4, cy - 4, 4, 4);
+}
+
+function dibujarFinal() {
+  dibujarFondoEspacial(['#3a2a8a', '#0d0b2e'], 0);
+  const off = (estado.tiempo * 0.15) % 640;
+  ctx.drawImage(fondos.nebulosa, off, 0);
+  ctx.drawImage(fondos.nebulosa, off - 640, 0);
+  ctx.drawImage(fondos.paisaje, 0, 0);
+  for (const c of estado.confeti) {
+    const ancho = Math.max(1, Math.round(Math.abs(Math.cos(c.fase)) * 4));
+    ctx.fillStyle = c.color;
+    ctx.fillRect(Math.round(c.x), Math.round(c.y), ancho, 4);
+  }
+  dibujarParticulas();
+
+  const t = estado.tiempo / 12;
+  dibujarEstrellaGrande(150, 66, 16, t);
+  dibujarEstrellaGrande(490, 66, 16, t + 3);
+
+  const flota = Math.round(Math.sin(estado.tiempo / 30) * 2);
+  dibujarTexto('MISSION', 320, 44 + flota, 6, { alinear: 'centro', estilo: 'titulo', borde: 3, sombra: PALETA.naranjaOscuro });
+  dibujarTexto('ACCOMPLISHED!', 320, 96 + flota, 6, { alinear: 'centro', estilo: 'titulo', borde: 3, sombra: PALETA.naranjaOscuro });
+  dibujarTexto('CONGRATULATIONS, ASTRONAUT!', 320, 152, 2, { alinear: 'centro', color: PALETA.amarillo });
+  dibujarTexto('YOU COMPLETED ALL 10 LEVELS', 320, 170, 2, { alinear: 'centro', color: PALETA.cian });
+
+  const listo = estado.bloqueoInput <= 0;
+  const parp = Math.floor(estado.tiempo / 20) % 2 === 0;
+  dibujarTexto('PLAY AGAIN', 320, 198, 3, { alinear: 'centro', estilo: 'titulo', borde: 2, sombra: PALETA.naranjaOscuro, alfa: listo ? 1 : 0.4 });
+  if (listo && parp) {
+    dibujarTexto('→', 168, 200, 3, { color: PALETA.amarillo });
+    dibujarTexto('←', 458, 200, 3, { color: PALETA.amarillo });
+  }
+  dibujarTexto('PRESS ↑ OR TAP THE BUTTON', 320, 226, 1, { alinear: 'centro', color: PALETA.lila, alfa: listo ? 1 : 0.4 });
+
+  const a = estado.astroFinal;
+  dibujarAstro(312, 288 - CONFIG.JUG_H + a.y, a.y < -1 ? 'salto' : 'quieto', a.dir);
+
+  ctx.drawImage(fondos.marco, 0, 0);
+}
+
+// ===================== LOOP =====================
+function ajustarTamano() {
+  const escala = Math.min(window.innerWidth / CONFIG.ANCHO, window.innerHeight / CONFIG.ALTO);
+  lienzoJuego.style.width = Math.floor(CONFIG.ANCHO * escala) + 'px';
+  lienzoJuego.style.height = Math.floor(CONFIG.ALTO * escala) + 'px';
+  // Resolución interna en múltiplos enteros para que los píxeles se vean nítidos
+  const dpr = window.devicePixelRatio || 1;
+  factorResolucion = Math.max(1, Math.min(4, Math.ceil(escala * dpr)));
+  lienzoJuego.width = CONFIG.ANCHO * factorResolucion;
+  lienzoJuego.height = CONFIG.ALTO * factorResolucion;
+  ctx.imageSmoothingEnabled = false;
+}
+
+function actualizar() {
+  estado.tiempo++;
+  if (estado.bloqueoInput > 0) estado.bloqueoInput--;
+  actualizarFundido();
+  if (estado.pantalla === 'portada') actualizarPortada();
+  else if (estado.pantalla === 'juego') actualizarJuego();
+  else actualizarFinal();
+  actualizarParticulas();
+  saltoPulsado = false;
+}
+
+function dibujar() {
+  ctx.setTransform(factorResolucion, 0, 0, factorResolucion, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  if (estado.pantalla === 'portada') dibujarPortada();
+  else if (estado.pantalla === 'juego') dibujarJuego();
+  else dibujarFinal();
+  if (estado.fundido > 0) {
+    ctx.fillStyle = `rgba(6,4,18,${estado.fundido})`;
+    ctx.fillRect(0, 0, CONFIG.ANCHO, CONFIG.ALTO);
+  }
+}
+
+let ultimoTiempo = performance.now();
+let acumulado = 0;
+function bucle(ahora) {
+  let dt = (ahora - ultimoTiempo) / 1000;
+  ultimoTiempo = ahora;
+  if (dt > 0.1) dt = 0.1;
+  if (dt < 0) dt = 0;
+  acumulado += dt;
+  let pasos = 0;
+  while (acumulado >= CONFIG.PASO && pasos < 6) {
+    actualizar();
+    acumulado -= CONFIG.PASO;
+    pasos++;
+  }
+  dibujar();
+  requestAnimationFrame(bucle);
+}
+
+function iniciar() {
+  cargarProgreso();
+  prepararSprites();
+  prepararFondos();
+  ajustarTamano();
+  window.addEventListener('resize', ajustarTamano);
+  lienzoJuego.addEventListener('pointerdown', alPunteroAbajo);
+  lienzoJuego.addEventListener('pointermove', alPunteroMover);
+  lienzoJuego.addEventListener('pointerup', alPunteroArriba);
+  lienzoJuego.addEventListener('pointercancel', alPunteroArriba);
+  lienzoJuego.addEventListener('lostpointercapture', alPunteroArriba);
+  lienzoJuego.addEventListener('contextmenu', (e) => e.preventDefault());
+  lienzoJuego.focus({ preventScroll: true });
+  requestAnimationFrame((t) => { ultimoTiempo = t; bucle(t); });
+}
+iniciar();
+</script>
+</body>
+</html>

@@ -1,0 +1,1727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Creative Rhythm</title>
+<style>
+  /* ============================================================
+     PALETA DE MARCA
+     El JavaScript lee estas variables, así que los colores
+     se cambian solo aquí.
+     ============================================================ */
+  :root {
+    --azul: #006ba2;          /* azul profundo de marca: fondo, barras, contornos */
+    --azul-oscuro: #003d5e;   /* derivado del azul: degradados y sombras */
+    --azul-noche: #00253a;    /* derivado del azul: contorno exterior */
+    --naranja: #fe9405;       /* carril 1 y acentos cálidos */
+    --amarillo: #fae300;      /* carril 2 y estrellas */
+    --celeste: #1ab6d9;       /* carril 3 y destellos */
+    --crema: #fdf6e3;         /* carril 4 (neutro añadido) */
+    --naranja-claro: #ffb347; /* carril 5 (variante del naranja) */
+    --blanco: #ffffff;        /* texto */
+    --gris: #9fb3c1;          /* notas que se escapan */
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--azul);
+  }
+
+  body {
+    color: var(--blanco);
+    font-family: system-ui, sans-serif;
+  }
+
+  /* Contenedor a pantalla completa: centra el lienzo y hace de "letterbox" */
+  #escenario {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--azul);
+  }
+
+  /* El lienzo mide siempre 1500×800 por dentro; el JS ajusta su tamaño visible */
+  #lienzo {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: var(--azul);
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+    outline: none;
+    touch-action: manipulation;
+    cursor: pointer;
+  }
+
+  .solo-lectores {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .aviso-sin-js {
+    margin: 0;
+    padding: 2rem;
+    text-align: center;
+    font-size: 1.5rem;
+  }
+</style>
+</head>
+<body>
+<main id="escenario">
+  <h1 class="solo-lectores">Creative Rhythm</h1>
+  <canvas id="lienzo" width="1500" height="800" tabindex="0"
+          aria-label="Creative Rhythm game: hit the chord when the note reaches the line"></canvas>
+  <noscript><p class="aviso-sin-js">This game needs JavaScript enabled.</p></noscript>
+</main>
+
+<script>
+'use strict';
+
+/* =====================================================================
+   1. CONFIGURACIÓN GENERAL
+   ===================================================================== */
+const ANCHO = 1500;                 // ancho lógico del lienzo
+const ALTO = 800;                   // alto lógico del lienzo (15:8)
+const CELDA = 16;                   // rejilla base del pixel art
+const ZONA_TOP = 80;                // fin de la barra superior
+const ZONA_ALTO = 640;              // alto de la zona de juego
+const ZONA_BOTTOM = ZONA_TOP + ZONA_ALTO;   // 720: inicio de la barra inferior
+const ANCHO_CARRIL = 300;           // 5 carriles × 300 px = 1500 px
+const LINEA_ACIERTO = ZONA_BOTTOM - 120;    // 600: línea donde hay que tocar
+
+const TIEMPO_CAIDA = 3.0;           // segundos que tarda una nota en bajar hasta la línea
+const VENTANA_PERFECTA = 0.15;      // ±150 ms → 3 estrellas
+const VENTANA_BUENA = 0.30;         // ±300 ms → 2 estrellas
+const VENTANA_CASI = 0.45;          // ±450 ms → 1 estrella
+const DEBOUNCE_MS = 90;             // tiempo mínimo entre dos toques de la misma tecla
+
+const BPM = 66;                     // pulsos por minuto de la canción
+const SEG_POR_PULSO = 60 / BPM;
+const PULSOS_INTRO = 4;             // cuenta atrás antes de la primera nota
+const SEGUNDOS_FINAL = 2.5;         // espera tras la última nota
+const ESPERA_OTRA_VEZ = 1.5;        // segundos antes de aceptar "Otra vez"
+const VOLUMEN_GENERAL = 0.5;        // volumen maestro (0 a 1)
+
+/* =====================================================================
+   2. PALETA (leída de las variables CSS)
+   ===================================================================== */
+const estilosRaiz = getComputedStyle(document.documentElement);
+function leerColor(variable, porDefecto) {
+  const valor = estilosRaiz.getPropertyValue(variable).trim();
+  return /^#[0-9a-f]{6}$/i.test(valor) ? valor : porDefecto;
+}
+
+const COLORES = {
+  azul: leerColor('--azul', '#006ba2'),
+  azulOscuro: leerColor('--azul-oscuro', '#003d5e'),
+  azulNoche: leerColor('--azul-noche', '#00253a'),
+  naranja: leerColor('--naranja', '#fe9405'),
+  amarillo: leerColor('--amarillo', '#fae300'),
+  celeste: leerColor('--celeste', '#1ab6d9'),
+  crema: leerColor('--crema', '#fdf6e3'),
+  naranjaClaro: leerColor('--naranja-claro', '#ffb347'),
+  blanco: leerColor('--blanco', '#ffffff'),
+  gris: leerColor('--gris', '#9fb3c1'),
+};
+
+// Un color, una letra y una nota musical por carril
+const COLORES_CARRIL = [COLORES.naranja, COLORES.amarillo, COLORES.celeste, COLORES.crema, COLORES.naranjaClaro];
+// Símbolo que se muestra en cada carril: flechas y barra espaciadora
+const LETRAS_CARRIL = ['←', '↑', '↓', '→', '␣'];
+const NOMBRES_NOTA = ['C', 'D', 'E', 'G', 'A'];
+const NOMBRES_TECLA = ['←', '↑', '↓', '→', 'SPACE'];
+const FRECUENCIAS = [261.63, 293.66, 329.63, 392.00, 440.00]; // C4 D4 E4 G4 A4
+
+// Teclas aceptadas (event.code) → índice de carril (0 a 4)
+const MAPA_TECLAS = {
+  ArrowLeft: 0, ArrowUp: 1, ArrowDown: 2, ArrowRight: 3, Space: 4,
+  // Alternativa: el conector trasero de la Makey Makey (A S D F G) sigue funcionando
+  KeyA: 0, KeyS: 1, KeyD: 2, KeyF: 3, KeyG: 4,
+};
+
+/* =====================================================================
+   3. LA CANCIÓN
+   tiempo = pulso en el que la nota llega a la línea (0, 1, 2…; 4 pulsos = 1 compás)
+   carril = 1 (←, Do) · 2 (↑, Re) · 3 (↓, Mi) · 4 (→, Sol) · 5 (espacio, La)
+   Melodía pentatónica original de 8 compases, tocada dos veces
+   (la segunda con variaciones) y un pequeño final.
+   ===================================================================== */
+const CANCION = [
+  // ---------- Parte A ----------
+  // Compás 1: subimos la escala
+  { tiempo: 0, carril: 1 }, { tiempo: 1, carril: 2 }, { tiempo: 2, carril: 3 }, { tiempo: 3, carril: 4 },
+  // Compás 2: arriba del todo y respiramos
+  { tiempo: 4, carril: 5 }, { tiempo: 6, carril: 4 },
+  // Compás 3
+  { tiempo: 8, carril: 3 }, { tiempo: 9, carril: 3 }, { tiempo: 10, carril: 4 },
+  // Compás 4: nota larga
+  { tiempo: 12, carril: 3 },
+  // Compás 5: bajamos la escala
+  { tiempo: 16, carril: 5 }, { tiempo: 17, carril: 4 }, { tiempo: 18, carril: 3 }, { tiempo: 19, carril: 2 },
+  // Compás 6
+  { tiempo: 20, carril: 1 }, { tiempo: 22, carril: 2 },
+  // Compás 7
+  { tiempo: 24, carril: 3 }, { tiempo: 25, carril: 2 }, { tiempo: 26, carril: 3 }, { tiempo: 27, carril: 4 },
+  // Compás 8: volvemos a casa
+  { tiempo: 28, carril: 2 }, { tiempo: 30, carril: 1 },
+
+  // ---------- Parte A' (con variaciones) ----------
+  // Compás 9
+  { tiempo: 32, carril: 1 }, { tiempo: 33, carril: 2 }, { tiempo: 34, carril: 3 }, { tiempo: 35, carril: 4 },
+  // Compás 10
+  { tiempo: 36, carril: 5 }, { tiempo: 37, carril: 4 }, { tiempo: 38, carril: 5 },
+  // Compás 11
+  { tiempo: 40, carril: 4 }, { tiempo: 41, carril: 3 }, { tiempo: 42, carril: 2 }, { tiempo: 43, carril: 3 },
+  // Compás 12
+  { tiempo: 44, carril: 3 }, { tiempo: 46, carril: 4 },
+  // Compás 13
+  { tiempo: 48, carril: 5 }, { tiempo: 49, carril: 4 }, { tiempo: 50, carril: 3 }, { tiempo: 51, carril: 2 },
+  // Compás 14
+  { tiempo: 52, carril: 1 }, { tiempo: 53, carril: 2 }, { tiempo: 54, carril: 3 },
+  // Compás 15
+  { tiempo: 56, carril: 4 }, { tiempo: 57, carril: 5 }, { tiempo: 58, carril: 4 }, { tiempo: 59, carril: 3 },
+  // Compás 16
+  { tiempo: 60, carril: 2 }, { tiempo: 62, carril: 1 },
+
+  // ---------- Final: arpegio de Do mayor ----------
+  { tiempo: 64, carril: 1 }, { tiempo: 65, carril: 3 }, { tiempo: 66, carril: 4 },
+];
+
+// Bajo suave de acompañamiento (un acorde por compás, se repite cada 8 compases)
+const PROGRESION_BAJO = ['C', 'F', 'A', 'C', 'G', 'A', 'G', 'C'];
+const FRECUENCIAS_BAJO = { C: 130.81, F: 87.31, G: 98.00, A: 110.00 };
+
+/* =====================================================================
+   4. UTILIDADES DE COLOR Y LIENZO
+   ===================================================================== */
+function hexARgb(hex) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function mezclar(colorA, colorB, t) {
+  const a = hexARgb(colorA);
+  const b = hexARgb(colorB);
+  return '#' + a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0')).join('');
+}
+
+function conAlfa(hex, alfa) {
+  const [r, g, b] = hexARgb(hex);
+  return `rgba(${r},${g},${b},${alfa})`;
+}
+
+function crearLienzo(ancho, alto) {
+  const lienzoNuevo = document.createElement('canvas');
+  lienzoNuevo.width = Math.max(1, Math.ceil(ancho));
+  lienzoNuevo.height = Math.max(1, Math.ceil(alto));
+  const contexto = lienzoNuevo.getContext('2d');
+  contexto.imageSmoothingEnabled = false;
+  return [lienzoNuevo, contexto];
+}
+
+const limitar = (v, min, max) => Math.max(min, Math.min(max, v));
+const centroCarril = (carril) => carril * ANCHO_CARRIL + ANCHO_CARRIL / 2;
+
+/* =====================================================================
+   5. FUENTE PIXEL ART (5×7, generada por código)
+   Cada letra son 7 filas separadas por espacios; '#' = píxel encendido.
+   ===================================================================== */
+const FUENTE = {
+  ' ': '..... ..... ..... ..... ..... ..... .....',
+  'A': '.###. #...# #...# ##### #...# #...# #...#',
+  'B': '####. #...# #...# ####. #...# #...# ####.',
+  'C': '.###. #...# #.... #.... #.... #...# .###.',
+  'D': '####. #...# #...# #...# #...# #...# ####.',
+  'E': '##### #.... #.... ####. #.... #.... #####',
+  'F': '##### #.... #.... ####. #.... #.... #....',
+  'G': '.###. #...# #.... #.### #...# #...# .####',
+  'H': '#...# #...# #...# ##### #...# #...# #...#',
+  'I': '.###. ..#.. ..#.. ..#.. ..#.. ..#.. .###.',
+  'J': '..### ...#. ...#. ...#. #..#. #..#. .##..',
+  'K': '#...# #..#. #.#.. ##... #.#.. #..#. #...#',
+  'L': '#.... #.... #.... #.... #.... #.... #####',
+  'M': '#...# ##.## #.#.# #.#.# #...# #...# #...#',
+  'N': '#...# #...# ##..# #.#.# #..## #...# #...#',
+  'O': '.###. #...# #...# #...# #...# #...# .###.',
+  'P': '####. #...# #...# ####. #.... #.... #....',
+  'Q': '.###. #...# #...# #...# #.#.# #..#. .##.#',
+  'R': '####. #...# #...# ####. #.#.. #..#. #...#',
+  'S': '.#### #.... #.... .###. ....# ....# ####.',
+  'T': '##### ..#.. ..#.. ..#.. ..#.. ..#.. ..#..',
+  'U': '#...# #...# #...# #...# #...# #...# .###.',
+  'V': '#...# #...# #...# #...# #...# .#.#. ..#..',
+  'W': '#...# #...# #...# #.#.# #.#.# #.#.# .#.#.',
+  'X': '#...# #...# .#.#. ..#.. .#.#. #...# #...#',
+  'Y': '#...# #...# .#.#. ..#.. ..#.. ..#.. ..#..',
+  'Z': '##### ....# ...#. ..#.. .#... #.... #####',
+  '0': '.###. #...# #..## #.#.# ##..# #...# .###.',
+  '1': '..#.. .##.. ..#.. ..#.. ..#.. ..#.. .###.',
+  '2': '.###. #...# ....# ...#. ..#.. .#... #####',
+  '3': '####. ....# ....# .###. ....# ....# ####.',
+  '4': '...#. ..##. .#.#. #..#. ##### ...#. ...#.',
+  '5': '##### #.... ####. ....# ....# #...# .###.',
+  '6': '.###. #.... #.... ####. #...# #...# .###.',
+  '7': '##### ....# ...#. ..#.. .#... .#... .#...',
+  '8': '.###. #...# #...# .###. #...# #...# .###.',
+  '9': '.###. #...# #...# .#### ....# ....# .###.',
+  '!': '..#.. ..#.. ..#.. ..#.. ..#.. ..... ..#..',
+  '¡': '..#.. ..... ..#.. ..#.. ..#.. ..#.. ..#..',
+  '?': '.###. #...# ....# ...#. ..#.. ..... ..#..',
+  '¿': '..#.. ..... ..#.. .#... #.... #...# .###.',
+  '.': '..... ..... ..... ..... ..... ..... ..#..',
+  ',': '..... ..... ..... ..... ..... ..#.. .#...',
+  ':': '..... ..#.. ..#.. ..... ..#.. ..#.. .....',
+  '-': '..... ..... ..... .###. ..... ..... .....',
+  '+': '..... ..#.. ..#.. ##### ..#.. ..#.. .....',
+  '=': '..... ..... ##### ..... ##### ..... .....',
+  '/': '....# ...#. ...#. ..#.. .#... .#... #....',
+  '(': '...#. ..#.. .#... .#... .#... ..#.. ...#.',
+  ')': '.#... ..#.. ...#. ...#. ...#. ..#.. .#...',
+  "'": '..#.. ..#.. ..... ..... ..... ..... .....',
+  // Flechas y barra espaciadora: más anchas y gruesas para que se reconozcan de un vistazo
+  '←': '...#... ..##... .###### ####### .###### ..##... ...#...',
+  '→': '...#... ...##.. ######. ####### ######. ...##.. ...#...',
+  '↑': '...#... ..###.. .#####. ####### ..###.. ..###.. ..###..',
+  '↓': '..###.. ..###.. ..###.. ####### .#####. ..###.. ...#...',
+  '␣': '......... ......... ##.....## ##.....## ######### ######### .........',
+};
+
+// Tildes y diéresis: se dibujan encima de la letra base (2 filas extra)
+const MARCAS = {
+  aguda: ['...#.', '..#..'],
+  virgulilla: ['.##.#', '#.##.'],
+  dieresis: ['.#.#.', '.....'],
+};
+const DIACRITICOS = {
+  'Á': ['A', 'aguda'], 'É': ['E', 'aguda'], 'Í': ['I', 'aguda'],
+  'Ó': ['O', 'aguda'], 'Ú': ['U', 'aguda'], 'Ñ': ['N', 'virgulilla'], 'Ü': ['U', 'dieresis'],
+};
+
+// Cada texto se dibuja una vez en un lienzo pequeño y se reutiliza
+const cacheTextos = new Map();
+
+function lienzoTexto(texto, escala, color, contorno, colorContorno, sombra, colorSombra) {
+  const clave = [texto, escala, Array.isArray(color) ? color.join(',') : color, contorno, colorContorno, sombra, colorSombra].join('|');
+  if (cacheTextos.has(clave)) return cacheTextos.get(clave);
+  if (cacheTextos.size > 600) cacheTextos.clear();
+
+  const caracteres = [...String(texto).toUpperCase()];
+  // Los glifos pueden tener ancho distinto (las flechas y el espacio son más anchos)
+  const glifoDe = (ch) => FUENTE[DIACRITICOS[ch] ? DIACRITICOS[ch][0] : ch] || FUENTE['?'];
+  const anchos = caracteres.map((ch) => glifoDe(ch).split(' ')[0].length);
+  const inicios = [];
+  let cursor = 0;
+  anchos.forEach((a) => { inicios.push(cursor); cursor += a + 1; });
+  const celdasAncho = Math.max(1, cursor - 1);
+  const celdasAlto = 10; // 2 filas para tildes + 1 de aire + 7 de letra
+  const margen = contorno + sombra;
+  const [lienzoT, c] = crearLienzo(celdasAncho * escala + margen * 2, celdasAlto * escala + margen * 2);
+
+  // Lista de píxeles encendidos: [x, y, índice de carácter]
+  const pixeles = [];
+  caracteres.forEach((caracter, indice) => {
+    let base = caracter;
+    let marca = null;
+    if (DIACRITICOS[caracter]) [base, marca] = DIACRITICOS[caracter];
+    const glifo = glifoDe(caracter);
+    glifo.split(' ').forEach((fila, y) => {
+      [...fila].forEach((p, x) => { if (p === '#') pixeles.push([inicios[indice] + x, y + 3, indice]); });
+    });
+    if (marca) {
+      MARCAS[marca].forEach((fila, y) => {
+        [...fila].forEach((p, x) => { if (p === '#') pixeles.push([inicios[indice] + x, y, indice]); });
+      });
+    }
+  });
+
+  const pintar = (desplY, extra, colorDe) => {
+    for (const [x, y, i] of pixeles) {
+      c.fillStyle = colorDe(i);
+      c.fillRect(margen + x * escala - extra, margen + y * escala - extra + desplY, escala + extra * 2, escala + extra * 2);
+    }
+  };
+  if (sombra > 0) pintar(sombra, contorno, () => colorSombra);
+  if (contorno > 0) pintar(0, contorno, () => colorContorno);
+  pintar(0, 0, (i) => (Array.isArray(color) ? color[i % color.length] : color));
+
+  const datos = { lienzo: lienzoT, ancho: celdasAncho * escala, margen, capTop: 3 * escala, capAlto: 7 * escala };
+  cacheTextos.set(clave, datos);
+  return datos;
+}
+
+/**
+ * Dibuja texto pixel art. (x, y) = punto de anclaje; y es el centro vertical de las mayúsculas.
+ * opciones: escala, color (o lista de colores por letra), contorno, colorContorno,
+ *           sombra, colorSombra, alinear ('centro' | 'izquierda' | 'derecha'), zoom, alfa
+ */
+function dibujarTexto(texto, x, y, opciones = {}) {
+  const escala = opciones.escala || 4;
+  const color = opciones.color || COLORES.blanco;
+  const contorno = opciones.contorno ?? Math.max(2, Math.round(escala * 0.75));
+  const colorContorno = opciones.colorContorno || COLORES.azul;
+  const sombra = opciones.sombra ?? Math.max(2, Math.round(escala * 0.75));
+  const colorSombra = opciones.colorSombra || COLORES.azulNoche;
+  const alinear = opciones.alinear || 'centro';
+  const zoom = opciones.zoom ?? 1;
+  const alfa = opciones.alfa ?? 1;
+  if (alfa <= 0) return 0;
+
+  const d = lienzoTexto(texto, escala, color, contorno, colorContorno, sombra, colorSombra);
+  let x0 = x;
+  if (alinear === 'centro') x0 = x - d.ancho / 2;
+  else if (alinear === 'derecha') x0 = x - d.ancho;
+  const y0 = y - d.capAlto / 2 - d.capTop;
+
+  ctx.save();
+  ctx.globalAlpha *= alfa;
+  if (zoom !== 1) {
+    ctx.translate(x, y);
+    ctx.scale(zoom, zoom);
+    ctx.translate(-x, -y);
+  }
+  ctx.drawImage(d.lienzo, Math.round(x0 - d.margen), Math.round(y0 - d.margen));
+  ctx.restore();
+  return d.ancho;
+}
+
+/* =====================================================================
+   6. SPRITES PIXEL ART (generados por código)
+   ===================================================================== */
+
+// Convierte una matriz de colores (null = vacío) en un sprite con doble contorno grueso:
+// anillo interior en azul de marca y anillo exterior en azul noche.
+function spriteDesdeMatriz(matriz, escala, contornoInterior = COLORES.azul, contornoExterior = COLORES.azulNoche) {
+  const alto = matriz.length;
+  const ancho = matriz[0].length;
+  const M = 2;
+  const W = ancho + M * 2;
+  const H = alto + M * 2;
+  const celdas = [];
+  for (let y = 0; y < H; y++) {
+    const fila = [];
+    for (let x = 0; x < W; x++) {
+      const mx = x - M;
+      const my = y - M;
+      fila.push(mx >= 0 && my >= 0 && mx < ancho && my < alto ? matriz[my][mx] : null);
+    }
+    celdas.push(fila);
+  }
+  const ocupada = (x, y) => x >= 0 && y >= 0 && x < W && y < H && celdas[y][x] !== null;
+
+  if (contornoInterior) {
+    const anillo = [];
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (ocupada(x, y)) continue;
+        let toca = false;
+        for (let dy = -1; dy <= 1 && !toca; dy++) {
+          for (let dx = -1; dx <= 1 && !toca; dx++) {
+            if (ocupada(x + dx, y + dy)) toca = true;
+          }
+        }
+        if (toca) anillo.push([x, y]);
+      }
+    }
+    anillo.forEach(([x, y]) => { celdas[y][x] = contornoInterior; });
+  }
+  if (contornoExterior) {
+    const anillo = [];
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (!ocupada(x, y) && (ocupada(x + 1, y) || ocupada(x - 1, y) || ocupada(x, y + 1) || ocupada(x, y - 1))) {
+          anillo.push([x, y]);
+        }
+      }
+    }
+    anillo.forEach(([x, y]) => { celdas[y][x] = contornoExterior; });
+  }
+
+  const [lienzoSprite, c] = crearLienzo(W * escala, H * escala);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (celdas[y][x]) {
+        c.fillStyle = celdas[y][x];
+        c.fillRect(x * escala, y * escala, escala, escala);
+      }
+    }
+  }
+  return lienzoSprite;
+}
+
+// Rectángulo con esquinas redondeadas en escalera (pixel art)
+function matrizRedondeada(W, H, colorCelda, radio = 2) {
+  const dentro = (x, y) => x >= 0 && y >= 0 && x < W && y < H &&
+    Math.min(y, H - 1 - y) + Math.min(x, W - 1 - x) >= radio;
+  const m = [];
+  for (let y = 0; y < H; y++) {
+    const fila = [];
+    for (let x = 0; x < W; x++) {
+      if (!dentro(x, y)) { fila.push(null); continue; }
+      const borde = !dentro(x + 1, y) || !dentro(x - 1, y) || !dentro(x, y + 1) || !dentro(x, y - 1);
+      fila.push(colorCelda(x, y, borde));
+    }
+    m.push(fila);
+  }
+  return m;
+}
+
+function matrizDesdePlantilla(plantilla, paleta) {
+  return plantilla.map((fila) => [...fila].map((ch) => (ch === '.' ? null : paleta[ch])));
+}
+
+function pintarPlantilla(m, plantilla, ox, oy, color) {
+  plantilla.forEach((fila, j) => {
+    [...fila].forEach((ch, i) => {
+      if (ch === '#' && m[oy + j] && m[oy + j][ox + i] !== undefined) m[oy + j][ox + i] = color;
+    });
+  });
+}
+
+// Púa de guitarra (icono dentro de cada nota)
+const PLANTILLA_PUA = [
+  '.#####.',
+  '#######',
+  '#######',
+  '.#####.',
+  '..###..',
+  '...#...',
+];
+
+// Estrella "cute" con ojitos
+const PLANTILLA_ESTRELLA = [
+  '......#......',
+  '.....###.....',
+  '.....#w#.....',
+  '....#w###....',
+  '#####w#######',
+  '.###########.',
+  '..###o#o###..',
+  '...#######...',
+  '...#######...',
+  '..####.####..',
+  '..###...###..',
+  '.##.......##.',
+];
+
+// Nota: rectángulo redondeado con brillo y una púa dentro (20×12 celdas)
+function matrizNota(color) {
+  const W = 20;
+  const H = 12;
+  const claro = mezclar(color, '#ffffff', 0.4);
+  const oscuro = mezclar(color, COLORES.azulNoche, 0.28);
+  const m = matrizRedondeada(W, H, (x, y) => (y <= 2 ? claro : (y >= H - 3 ? oscuro : color)));
+  for (let x = 3; x <= 6; x++) m[2][x] = COLORES.blanco;   // brillo
+  m[3][3] = COLORES.blanco;
+  pintarPlantilla(m, PLANTILLA_PUA, 6, 3, COLORES.azul);   // púa centrada
+  m[4][7] = COLORES.celeste;                                 // brillo de la púa
+  m[4][8] = COLORES.celeste;
+  return m;
+}
+
+// Receptor de la línea de acierto: marco del color del carril
+function matrizReceptor(color, activo) {
+  const relleno = activo ? mezclar(color, COLORES.azulNoche, 0.35) : 'rgba(0,37,58,0.55)';
+  const m = matrizRedondeada(20, 12, (x, y, borde) => (borde ? color : relleno));
+  if (activo) for (let x = 3; x <= 6; x++) m[2][x] = mezclar(color, '#ffffff', 0.5);
+  return m;
+}
+
+// Ficha de tecla para la pantalla de inicio
+function matrizFicha(color) {
+  const H = 13;
+  const claro = mezclar(color, '#ffffff', 0.45);
+  const oscuro = mezclar(color, COLORES.azulNoche, 0.3);
+  const m = matrizRedondeada(16, H, (x, y) => (y <= 1 ? claro : (y >= H - 3 ? oscuro : color)));
+  m[2][3] = COLORES.blanco;
+  m[2][4] = COLORES.blanco;
+  return m;
+}
+
+// Botón grande con relieve
+function matrizBoton(color) {
+  const H = 9;
+  const claro = mezclar(color, '#ffffff', 0.35);
+  const oscuro = mezclar(color, COLORES.azulNoche, 0.3);
+  const m = matrizRedondeada(44, H, (x, y) => (y <= 1 ? claro : (y >= H - 2 ? oscuro : color)));
+  for (let x = 3; x <= 8; x++) m[1][x] = COLORES.blanco;
+  return m;
+}
+
+// Guitarra de 5 cuerdas (110×40 celdas). Las cuerdas se dibujan aparte para que vibren.
+function matrizGuitarra() {
+  const W = 110;
+  const H = 40;
+  const m = Array.from({ length: H }, () => Array(W).fill(null));
+  const enCirculo = (x, y, cx, cy, r) => (x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 <= r * r;
+  const enCuerpo = (x, y) => enCirculo(x, y, 16, 20, 15) || enCirculo(x, y, 36, 20, 11.5);
+  const madera = mezclar(COLORES.naranja, COLORES.azulNoche, 0.35);
+  const sombraCuerpo = mezclar(COLORES.naranja, COLORES.azulNoche, 0.18);
+
+  // Cuerpo con ribete crema, brillo y sombra
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < 50; x++) {
+      if (!enCuerpo(x, y)) continue;
+      const borde = !enCuerpo(x + 1, y) || !enCuerpo(x - 1, y) || !enCuerpo(x, y + 1) || !enCuerpo(x, y - 1);
+      let c = COLORES.naranja;
+      if (enCirculo(x, y, 11, 13, 6)) c = COLORES.naranjaClaro;
+      if (y >= 31) c = sombraCuerpo;
+      if (borde) c = COLORES.crema;
+      m[y][x] = c;
+    }
+  }
+  // Boca con roseta amarilla
+  for (let y = 10; y < 31; y++) {
+    for (let x = 20; x < 42; x++) {
+      if (enCirculo(x, y, 31, 20, 7)) m[y][x] = COLORES.amarillo;
+      if (enCirculo(x, y, 31, 20, 5)) m[y][x] = COLORES.azulNoche;
+    }
+  }
+  // Puente
+  for (let y = 13; y <= 27; y++) for (let x = 6; x <= 10; x++) m[y][x] = COLORES.azulNoche;
+  for (let y = 15; y <= 25; y++) m[y][8] = COLORES.crema;
+  // Mástil con trastes y marcas celestes
+  for (let y = 15; y <= 25; y++) for (let x = 40; x <= 91; x++) m[y][x] = madera;
+  [46, 52, 58, 64, 70, 76, 82, 88].forEach((x) => { for (let y = 15; y <= 25; y++) m[y][x] = COLORES.crema; });
+  [49, 61, 73, 85].forEach((x) => { m[20][x] = COLORES.celeste; });
+  // Cejuela
+  for (let y = 15; y <= 25; y++) m[y][92] = COLORES.crema;
+  // Pala
+  for (let y = 13; y <= 27; y++) {
+    for (let x = 93; x <= 104; x++) {
+      if (x >= 103 && (y <= 14 || y >= 26)) continue;
+      m[y][x] = COLORES.naranja;
+    }
+  }
+  // Clavijas (3 arriba, 2 abajo = 5 cuerdas)
+  [95, 99, 103].forEach((x) => { m[11][x] = m[11][x + 1] = m[12][x] = m[12][x + 1] = COLORES.crema; });
+  [96, 100].forEach((x) => { m[28][x] = m[28][x + 1] = m[29][x] = m[29][x + 1] = COLORES.crema; });
+  return m;
+}
+
+const SPRITES = {
+  nota: COLORES_CARRIL.map((c) => spriteDesdeMatriz(matrizNota(c), 5)),
+  notaGris: spriteDesdeMatriz(matrizNota(COLORES.gris), 5),
+  receptor: COLORES_CARRIL.map((c) => spriteDesdeMatriz(matrizReceptor(c, false), 5)),
+  receptorActivo: COLORES_CARRIL.map((c) => spriteDesdeMatriz(matrizReceptor(c, true), 5)),
+  ficha: COLORES_CARRIL.map((c) => spriteDesdeMatriz(matrizFicha(c), 5)),
+  boton: spriteDesdeMatriz(matrizBoton(COLORES.naranja), 8),
+  botonApagado: spriteDesdeMatriz(matrizBoton(COLORES.gris), 8),
+  estrellaPeq: spriteDesdeMatriz(matrizDesdePlantilla(PLANTILLA_ESTRELLA, { '#': COLORES.amarillo, w: COLORES.blanco, o: COLORES.azulNoche }), 2),
+  estrella: spriteDesdeMatriz(matrizDesdePlantilla(PLANTILLA_ESTRELLA, { '#': COLORES.amarillo, w: COLORES.blanco, o: COLORES.azulNoche }), 3),
+  estrellaGrande: spriteDesdeMatriz(matrizDesdePlantilla(PLANTILLA_ESTRELLA, { '#': COLORES.amarillo, w: COLORES.blanco, o: COLORES.azulNoche }), 8),
+  pua: spriteDesdeMatriz(matrizDesdePlantilla(PLANTILLA_PUA, { '#': COLORES.crema }), 3),
+  guitarra: spriteDesdeMatriz(matrizGuitarra(), 6),
+};
+
+/* =====================================================================
+   7. FONDOS PRECALCULADOS
+   ===================================================================== */
+
+// Degradado en escalones de 16 px (pixel art) de #006ba2 a un azul más oscuro
+function pintarDegradadoEscalonado(c, ancho, alto, colorArriba, colorAbajo) {
+  const pasos = Math.ceil(alto / CELDA);
+  for (let i = 0; i < pasos; i++) {
+    c.fillStyle = mezclar(colorArriba, colorAbajo, i / Math.max(1, pasos - 1));
+    c.fillRect(0, i * CELDA, ancho, CELDA);
+  }
+}
+
+function pintarPuntos(c, ancho, alto) {
+  c.fillStyle = 'rgba(255,255,255,0.05)';
+  for (let y = CELDA; y < alto; y += CELDA * 2) {
+    for (let x = CELDA; x < ancho; x += CELDA * 2) c.fillRect(x - 2, y - 2, 4, 4);
+  }
+}
+
+function crearFondoPantalla() {
+  const [f, c] = crearLienzo(ANCHO, ALTO);
+  pintarDegradadoEscalonado(c, ANCHO, ALTO, COLORES.azul, COLORES.azulOscuro);
+  pintarPuntos(c, ANCHO, ALTO);
+  return f;
+}
+
+function crearFondoJuego() {
+  const [f, c] = crearLienzo(ANCHO, ZONA_ALTO);
+  pintarDegradadoEscalonado(c, ANCHO, ZONA_ALTO, COLORES.azul, mezclar(COLORES.azulOscuro, COLORES.azulNoche, 0.4));
+  pintarPuntos(c, ANCHO, ZONA_ALTO);
+  // Tinte suave de cada carril
+  COLORES_CARRIL.forEach((color, i) => {
+    c.fillStyle = conAlfa(color, 0.06);
+    c.fillRect(i * ANCHO_CARRIL, 0, ANCHO_CARRIL, ZONA_ALTO);
+  });
+  // Zona de letras bajo los receptores
+  c.fillStyle = 'rgba(0,20,35,0.35)';
+  c.fillRect(0, ZONA_ALTO - 80, ANCHO, 80);
+  // Separadores entre carriles
+  c.fillStyle = conAlfa(COLORES.azulNoche, 0.75);
+  for (let i = 1; i < 5; i++) c.fillRect(i * ANCHO_CARRIL - 3, 0, 6, ZONA_ALTO);
+  return f;
+}
+
+// Luz vertical de un carril (para latidos, aciertos y fallos)
+function crearLuz(color) {
+  const [f, c] = crearLienzo(ANCHO_CARRIL, ZONA_ALTO);
+  const g = c.createLinearGradient(0, 0, 0, ZONA_ALTO);
+  const posLinea = (LINEA_ACIERTO - ZONA_TOP) / ZONA_ALTO;
+  g.addColorStop(0, conAlfa(color, 0));
+  g.addColorStop(posLinea, conAlfa(color, 0.85));
+  g.addColorStop(1, conAlfa(color, 0.3));
+  c.fillStyle = g;
+  c.fillRect(0, 0, ANCHO_CARRIL, ZONA_ALTO);
+  return f;
+}
+
+const FONDO_PANTALLA = crearFondoPantalla();
+const FONDO_JUEGO = crearFondoJuego();
+const LUZ_CARRIL = COLORES_CARRIL.map(crearLuz);
+const LUZ_GRIS = crearLuz(COLORES.gris);
+
+// Destellos que titilan en el fondo
+const DESTELLOS = Array.from({ length: 60 }, () => ({
+  x: Math.random() * ANCHO,
+  y: Math.random() * ALTO,
+  fase: Math.random() * Math.PI * 2,
+  velocidad: 1 + Math.random() * 2,
+  color: Math.random() < 0.6 ? COLORES.celeste : COLORES.blanco,
+}));
+
+/* =====================================================================
+   8. ESTADO DEL JUEGO
+   Máquina de estados: 'inicio' → 'jugando' → 'final' → 'jugando'…
+   ===================================================================== */
+const lienzo = document.getElementById('lienzo');
+const ctx = lienzo.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+const escenario = document.getElementById('escenario');
+
+let tiempoGlobal = 0;           // segundos desde que se abrió la página
+let ultimoTs = null;            // marca del frame anterior (requestAnimationFrame)
+let ultimoFrameMs = performance.now();
+
+const juego = {
+  estado: 'inicio',
+  tiempoEstado: 0,              // segundos en el estado actual
+  tiempoCancion: 0,             // reloj de la canción (negativo durante la cuenta atrás)
+  inicio: 0,
+  fin: 0,
+  notas: [],
+  estrellas: 0,
+  aciertos: { perfecto: 0, bueno: 0, casi: 0, perdida: 0 },
+  proximoPulso: 0,              // siguiente pulso de acompañamiento por programar
+  ultimoPulsoMusical: 0,
+  mensaje: null,                // indicador de la barra inferior
+  mensajeFinal: '',
+};
+
+const efectos = {
+  brillo: [0, 0, 0, 0, 0],      // luz de acierto por carril
+  gris: [0, 0, 0, 0, 0],        // parpadeo gris por nota perdida
+  rebote: [0, 0, 0, 0, 0],      // salto de la letra al pulsar
+  toque: [0, 0, 0, 0, 0],       // pulsación táctil / ratón
+  particulas: [],
+  anillos: [],
+  estrellasVolando: [],
+  textos: [],
+  confeti: [],
+  popContador: 0,
+};
+
+const calib = {
+  abierta: false,
+  ultimoCode: '',
+  ultimoKey: '',
+  carril: -1,
+  pulsaciones: [0, 0, 0, 0, 0],
+  rebotes: 0,
+  repeticiones: 0,
+};
+
+const teclasAbajo = new Set();
+const ultimaPulsacion = {};
+let zonaBoton = null;
+
+const CALIDADES = {
+  perfecto: { texto: 'GREAT!', color: COLORES.amarillo, estrellas: 3 },
+  bueno: { texto: 'GOOD!', color: COLORES.celeste, estrellas: 2 },
+  casi: { texto: 'ALMOST!', color: COLORES.crema, estrellas: 1 },
+};
+
+const HUD_ESTRELLA = { x: 770, y: 760 };
+
+/* =====================================================================
+   9. SONIDO (Web Audio API, sin archivos)
+   ===================================================================== */
+let audio = null;
+
+// El navegador solo deja crear sonido tras una acción del usuario
+function asegurarAudio() {
+  try {
+    if (!audio) {
+      const ContextoAudio = window.AudioContext || window.webkitAudioContext;
+      if (!ContextoAudio) return null;
+      const c = new ContextoAudio();
+      const maestro = c.createGain();
+      maestro.gain.value = VOLUMEN_GENERAL;
+      const compresor = c.createDynamicsCompressor();
+      maestro.connect(compresor);
+      compresor.connect(c.destination);
+      audio = { ctx: c, maestro };
+    }
+    if (audio.ctx.state === 'suspended') audio.ctx.resume();
+  } catch (error) {
+    console.warn('Creative Rhythm: audio could not start', error);
+  }
+  return audio;
+}
+
+// Guitarra sintética suave: triángulo + diente de sierra filtrado con envolvente corta
+function tocarCuerda(frecuencia, retraso = 0, volumen = 1) {
+  if (!audio) return;
+  const c = audio.ctx;
+  const t0 = c.currentTime + retraso;
+  const pico = Math.max(0.001, 0.28 * volumen);
+
+  const envolvente = c.createGain();
+  envolvente.gain.setValueAtTime(0.0001, t0);
+  envolvente.gain.exponentialRampToValueAtTime(pico, t0 + 0.006);
+  envolvente.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.1);
+
+  const filtro = c.createBiquadFilter();
+  filtro.type = 'lowpass';
+  filtro.Q.value = 2;
+  filtro.frequency.setValueAtTime(frecuencia * 8, t0);
+  filtro.frequency.exponentialRampToValueAtTime(frecuencia * 1.5, t0 + 0.35);
+
+  const osc1 = c.createOscillator();
+  osc1.type = 'triangle';
+  osc1.frequency.value = frecuencia;
+  const osc2 = c.createOscillator();
+  osc2.type = 'sawtooth';
+  osc2.frequency.value = frecuencia * 1.003;
+  const mezclaSierra = c.createGain();
+  mezclaSierra.gain.value = 0.3;
+
+  osc1.connect(filtro);
+  osc2.connect(mezclaSierra);
+  mezclaSierra.connect(filtro);
+  filtro.connect(envolvente);
+  envolvente.connect(audio.maestro);
+  osc1.start(t0);
+  osc2.start(t0);
+  osc1.stop(t0 + 1.2);
+  osc2.stop(t0 + 1.2);
+
+  // Toque "blip" de 8 bits encima
+  tocarBlip(frecuencia * 2, retraso, 0.045 * volumen, 0.07);
+}
+
+function tocarBlip(frecuencia, retraso = 0, volumen = 0.05, duracion = 0.08, tipo = 'square') {
+  if (!audio) return;
+  const c = audio.ctx;
+  const t0 = c.currentTime + retraso;
+  const osc = c.createOscillator();
+  osc.type = tipo;
+  osc.frequency.value = frecuencia;
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.001, volumen), t0 + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + duracion);
+  osc.connect(g);
+  g.connect(audio.maestro);
+  osc.start(t0);
+  osc.stop(t0 + duracion + 0.02);
+}
+
+function tocarBajo(frecuencia, retraso = 0) {
+  if (!audio) return;
+  const c = audio.ctx;
+  const t0 = c.currentTime + retraso;
+  const osc = c.createOscillator();
+  osc.type = 'triangle';
+  osc.frequency.value = frecuencia;
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.16, t0 + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+  osc.connect(g);
+  g.connect(audio.maestro);
+  osc.start(t0);
+  osc.stop(t0 + 0.55);
+}
+
+function tocarChispa(frecuencia) {
+  tocarBlip(frecuencia * 3, 0.06, 0.03, 0.06);
+  tocarBlip(frecuencia * 4, 0.12, 0.025, 0.08);
+}
+
+function tocarSintonia(frecuencias, separacion, volumen) {
+  frecuencias.forEach((f, i) => tocarCuerda(f, i * separacion, volumen));
+}
+
+// Programa el acompañamiento (bajo y "tic" de cuenta atrás) con un poco de antelación
+function programarRitmo() {
+  while (juego.proximoPulso <= juego.ultimoPulsoMusical) {
+    const tiempoPulso = juego.proximoPulso * SEG_POR_PULSO;
+    const falta = tiempoPulso - juego.tiempoCancion;
+    if (falta > 0.12) break;
+    const retraso = Math.max(0, falta);
+    if (juego.proximoPulso < 0) {
+      tocarBlip(1046.5, retraso, 0.05, 0.05, 'square');
+    } else {
+      const compas = Math.floor(juego.proximoPulso / 4);
+      const posicion = juego.proximoPulso % 4;
+      if (posicion === 0 || posicion === 2) {
+        tocarBajo(FRECUENCIAS_BAJO[PROGRESION_BAJO[compas % PROGRESION_BAJO.length]], retraso);
+      }
+    }
+    juego.proximoPulso++;
+  }
+}
+
+/* =====================================================================
+   10. LÓGICA DEL JUEGO
+   ===================================================================== */
+
+// Convierte el array CANCION en notas listas para jugar (y avisa de errores)
+function prepararNotas() {
+  const lista = [];
+  CANCION.forEach((n, i) => {
+    const valida = n && typeof n.tiempo === 'number' && isFinite(n.tiempo) && n.tiempo >= 0 &&
+      Number.isInteger(n.carril) && n.carril >= 1 && n.carril <= 5;
+    if (!valida) {
+      console.warn(`Creative Rhythm: note number ${i} is invalid and will be ignored`, n);
+      return;
+    }
+    lista.push({ t: n.tiempo * SEG_POR_PULSO, carril: n.carril - 1, estado: 'cayendo', tEstado: 0, yPerdida: 0, dir: 1 });
+  });
+  lista.sort((a, b) => a.t - b.t);
+  return lista;
+}
+
+function limpiarEfectos() {
+  efectos.particulas.length = 0;
+  efectos.anillos.length = 0;
+  efectos.estrellasVolando.length = 0;
+  efectos.textos.length = 0;
+  efectos.confeti.length = 0;
+  for (let i = 0; i < 5; i++) {
+    efectos.brillo[i] = 0;
+    efectos.gris[i] = 0;
+  }
+}
+
+function empezarPartida() {
+  juego.estado = 'jugando';
+  juego.tiempoEstado = 0;
+  juego.notas = prepararNotas();
+  const ultima = juego.notas.length ? juego.notas[juego.notas.length - 1].t : 0;
+  juego.inicio = -PULSOS_INTRO * SEG_POR_PULSO;
+  juego.fin = ultima + SEGUNDOS_FINAL;
+  juego.tiempoCancion = juego.inicio;
+  juego.proximoPulso = -PULSOS_INTRO;
+  juego.ultimoPulsoMusical = Math.ceil(ultima / SEG_POR_PULSO);
+  juego.estrellas = 0;
+  juego.aciertos = { perfecto: 0, bueno: 0, casi: 0, perdida: 0 };
+  juego.mensaje = null;
+  limpiarEfectos();
+  [523.25, 659.25, 783.99].forEach((f, i) => tocarBlip(f, i * 0.08, 0.05, 0.09));
+}
+
+function irAFinal() {
+  juego.estado = 'final';
+  juego.tiempoEstado = 0;
+  juego.mensajeFinal = elegirMensajeFinal();
+  limpiarEfectos();
+  efectos.confeti = Array.from({ length: 36 }, () => ({
+    x: Math.random() * ANCHO,
+    y: -Math.random() * ALTO,
+    vy: 60 + Math.random() * 90,
+    giro: Math.random() * 6,
+    velGiro: 2 + Math.random() * 4,
+    oscila: Math.random() * 6,
+  }));
+  tocarSintonia([261.63, 329.63, 392.00, 523.25], 0.14, 0.8);
+}
+
+function volverAlInicio() {
+  juego.estado = 'inicio';
+  juego.tiempoEstado = 0;
+  limpiarEfectos();
+}
+
+function elegirMensajeFinal() {
+  const maximo = Math.max(1, juego.notas.length * 3);
+  const proporcion = juego.estrellas / maximo;
+  if (juego.estrellas === 0) return 'NEXT TIME WE PLAY TOGETHER!';
+  if (proporcion >= 0.75) return 'YOU PLAY LIKE A ROCK STAR!';
+  if (proporcion >= 0.4) return 'WHAT A GREAT PERFORMANCE!';
+  return 'IT SOUNDS BETTER EVERY TIME!';
+}
+
+// Posición vertical de una nota según el reloj de la canción
+const VELOCIDAD = (LINEA_ACIERTO - (ZONA_TOP - 40)) / TIEMPO_CAIDA;
+function yDeNota(nota) {
+  return LINEA_ACIERTO - (nota.t - juego.tiempoCancion) * VELOCIDAD;
+}
+
+// Punto de entrada común para teclado, ratón y pantalla táctil
+function pulsarCarril(carril, ahoraMs) {
+  asegurarAudio();
+  efectos.rebote[carril] = 1;
+
+  if (calib.abierta) {
+    tocarCuerda(FRECUENCIAS[carril], 0, 0.8);
+    return;
+  }
+  switch (juego.estado) {
+    case 'inicio':
+      tocarCuerda(FRECUENCIAS[carril], 0, 0.7);
+      empezarPartida();
+      break;
+    case 'jugando':
+      intentarAcierto(carril, ahoraMs);
+      break;
+    case 'final':
+      if (juego.tiempoEstado >= ESPERA_OTRA_VEZ) empezarPartida();
+      else tocarCuerda(FRECUENCIAS[carril], 0, 0.5);
+      break;
+  }
+}
+
+function intentarAcierto(carril, ahoraMs) {
+  // Afinamos el tiempo con los milisegundos pasados desde el último frame
+  const ajuste = limitar((ahoraMs - ultimoFrameMs) / 1000, 0, 0.05);
+  const t = juego.tiempoCancion + ajuste;
+
+  let mejor = null;
+  let mejorDiferencia = Infinity;
+  for (const nota of juego.notas) {
+    if (nota.carril !== carril || nota.estado !== 'cayendo') continue;
+    const diferencia = Math.abs(nota.t - t);
+    if (diferencia <= VENTANA_CASI && diferencia < mejorDiferencia) {
+      mejor = nota;
+      mejorDiferencia = diferencia;
+    }
+  }
+
+  if (!mejor) {
+    // Sin nota cerca: la cuerda suena bajito, sin castigo
+    tocarCuerda(FRECUENCIAS[carril], 0, 0.45);
+    efectos.brillo[carril] = Math.max(efectos.brillo[carril], 0.25);
+    return;
+  }
+  registrarAcierto(mejor, mejorDiferencia);
+}
+
+function registrarAcierto(nota, diferencia) {
+  let calidad = 'casi';
+  if (diferencia <= VENTANA_PERFECTA) calidad = 'perfecto';
+  else if (diferencia <= VENTANA_BUENA) calidad = 'bueno';
+  const info = CALIDADES[calidad];
+  const carril = nota.carril;
+  const cx = centroCarril(carril);
+
+  nota.estado = 'acertada';
+  juego.estrellas += info.estrellas;
+  juego.aciertos[calidad]++;
+  juego.mensaje = { texto: info.texto, color: info.color, t: 0 };
+
+  efectos.brillo[carril] = 1;
+  explotarParticulas(cx, LINEA_ACIERTO, COLORES_CARRIL[carril], info.color, calidad === 'perfecto' ? 26 : 18);
+  efectos.anillos.push({ x: cx, y: LINEA_ACIERTO, t: 0, color: info.color });
+  efectos.textos.push({ texto: info.texto, x: cx, y: LINEA_ACIERTO - 80, t: 0, color: info.color });
+  for (let k = 0; k < info.estrellas; k++) {
+    efectos.estrellasVolando.push({ x0: cx + (k - 1) * 30, y0: LINEA_ACIERTO - 40, t: -k * 0.09, dur: 0.8, giro: Math.random() * 6 });
+  }
+
+  tocarCuerda(FRECUENCIAS[carril], 0, 1);
+  if (calidad === 'perfecto') tocarChispa(FRECUENCIAS[carril]);
+}
+
+function notaPerdida(nota) {
+  nota.estado = 'perdida';
+  nota.tEstado = 0;
+  nota.yPerdida = yDeNota(nota);
+  nota.dir = Math.random() < 0.5 ? -1 : 1;
+  efectos.gris[nota.carril] = 1;
+  juego.aciertos.perdida++;
+}
+
+function explotarParticulas(x, y, colorCarril, colorCalidad, cantidad) {
+  const colores = [colorCarril, colorCarril, colorCalidad, COLORES.blanco];
+  for (let i = 0; i < cantidad; i++) {
+    const vida = 0.5 + Math.random() * 0.4;
+    efectos.particulas.push({
+      x: x + (Math.random() - 0.5) * 60,
+      y: y + (Math.random() - 0.5) * 30,
+      vx: (Math.random() - 0.5) * 600,
+      vy: -150 - Math.random() * 450,
+      vida,
+      vidaMax: vida,
+      tam: [6, 8, 10][Math.floor(Math.random() * 3)],
+      color: colores[Math.floor(Math.random() * colores.length)],
+    });
+  }
+}
+
+function alternarCalibracion() {
+  calib.abierta = !calib.abierta;
+  teclasAbajo.clear();
+}
+
+/* =====================================================================
+   11. BUCLE DE JUEGO (requestAnimationFrame + delta time)
+   ===================================================================== */
+function bucle(ts) {
+  if (ultimoTs === null) ultimoTs = ts;
+  const dt = limitar((ts - ultimoTs) / 1000, 0, 0.1); // limitado para evitar saltos
+  ultimoTs = ts;
+  ultimoFrameMs = ts;
+  actualizar(dt);
+  dibujar();
+  requestAnimationFrame(bucle);
+}
+
+function actualizar(dt) {
+  tiempoGlobal += dt;
+  juego.tiempoEstado += dt;
+
+  for (let i = 0; i < 5; i++) {
+    efectos.brillo[i] = Math.max(0, efectos.brillo[i] - dt * 3);
+    efectos.gris[i] = Math.max(0, efectos.gris[i] - dt * 1.6);
+    efectos.rebote[i] = Math.max(0, efectos.rebote[i] - dt * 5);
+    efectos.toque[i] = Math.max(0, efectos.toque[i] - dt * 6);
+  }
+  efectos.popContador = Math.max(0, efectos.popContador - dt * 4);
+
+  if (juego.estado === 'jugando' && !calib.abierta) {
+    juego.tiempoCancion += dt;
+    programarRitmo();
+    for (const nota of juego.notas) {
+      if (nota.estado === 'cayendo' && juego.tiempoCancion > nota.t + VENTANA_CASI) notaPerdida(nota);
+      else if (nota.estado === 'perdida') {
+        nota.tEstado += dt;
+        if (nota.tEstado > 1.3) nota.estado = 'fuera';
+      }
+    }
+    if (juego.mensaje) juego.mensaje.t += dt;
+    if (juego.tiempoCancion >= juego.fin) irAFinal();
+  }
+
+  // Partículas con gravedad
+  for (const p of efectos.particulas) {
+    p.vida -= dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += 900 * dt;
+  }
+  efectos.particulas = efectos.particulas.filter((p) => p.vida > 0);
+
+  for (const a of efectos.anillos) a.t += dt;
+  efectos.anillos = efectos.anillos.filter((a) => a.t < 0.4);
+
+  for (const tx of efectos.textos) tx.t += dt;
+  efectos.textos = efectos.textos.filter((tx) => tx.t < 0.9);
+
+  for (const s of efectos.estrellasVolando) {
+    s.t += dt;
+    if (s.t >= s.dur && !s.llego) {
+      s.llego = true;
+      efectos.popContador = 1;
+      tocarBlip(1568, 0, 0.018, 0.05);
+    }
+  }
+  efectos.estrellasVolando = efectos.estrellasVolando.filter((s) => !s.llego);
+
+  for (const c of efectos.confeti) {
+    c.y += c.vy * dt;
+    c.giro += c.velGiro * dt;
+    if (c.y > ALTO + 40) {
+      c.y = -40;
+      c.x = Math.random() * ANCHO;
+    }
+  }
+}
+
+/* =====================================================================
+   12. DIBUJO
+   ===================================================================== */
+function fraccion(x) {
+  return ((x % 1) + 1) % 1;
+}
+
+// 1 justo en cada pulso y bajando hasta 0: hace "latir" los carriles
+function pulsoRitmo(t) {
+  return Math.pow(1 - fraccion(t / SEG_POR_PULSO), 3);
+}
+
+function carrilPresionado(i) {
+  if (efectos.toque[i] > 0) return true;
+  for (const code of teclasAbajo) if (MAPA_TECLAS[code] === i) return true;
+  return false;
+}
+
+function dibujarSprite(sprite, cx, cy, zoom = 1) {
+  const w = sprite.width * zoom;
+  const h = sprite.height * zoom;
+  ctx.drawImage(sprite, Math.round(cx - w / 2), Math.round(cy - h / 2), Math.round(w), Math.round(h));
+}
+
+// Moneda que gira: se estrecha en horizontal en vez de rotar (mantiene el pixel nítido)
+function dibujarEstrellaGirando(sprite, cx, cy, giro, escala = 1) {
+  ctx.save();
+  ctx.translate(Math.round(cx), Math.round(cy));
+  ctx.scale(Math.cos(giro) * escala, escala);
+  ctx.drawImage(sprite, -sprite.width / 2, -sprite.height / 2);
+  ctx.restore();
+}
+
+function dibujarChispa(x, y, alfa, color = COLORES.blanco) {
+  ctx.globalAlpha = alfa;
+  ctx.fillStyle = color;
+  const px = Math.round(x / 4) * 4;
+  const py = Math.round(y / 4) * 4;
+  ctx.fillRect(px, py, 4, 4);
+  ctx.fillRect(px - 4, py, 4, 4);
+  ctx.fillRect(px + 4, py, 4, 4);
+  ctx.fillRect(px, py - 4, 4, 4);
+  ctx.fillRect(px, py + 4, 4, 4);
+  ctx.globalAlpha = 1;
+}
+
+function dibujarDestellos(yMin, yMax, intensidad) {
+  for (const d of DESTELLOS) {
+    if (d.y < yMin || d.y > yMax) continue;
+    const a = (Math.sin(tiempoGlobal * d.velocidad + d.fase) + 1) / 2;
+    if (a < 0.3) continue;
+    ctx.globalAlpha = a * 0.5 * intensidad;
+    ctx.fillStyle = d.color;
+    const x = Math.round(d.x / 4) * 4;
+    const y = Math.round(d.y / 4) * 4;
+    ctx.fillRect(x, y, 4, 4);
+    if (a > 0.75) {
+      ctx.fillRect(x - 4, y, 4, 4);
+      ctx.fillRect(x + 4, y, 4, 4);
+      ctx.fillRect(x, y - 4, 4, 4);
+      ctx.fillRect(x, y + 4, 4, 4);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+function dibujarBoton(texto, cx, cy, activo) {
+  const sprite = activo ? SPRITES.boton : SPRITES.botonApagado;
+  const flotar = activo ? Math.round(Math.sin(tiempoGlobal * 3) * 4) : 0;
+  const x = Math.round(cx - sprite.width / 2);
+  const y = Math.round(cy - sprite.height / 2 + flotar);
+  ctx.drawImage(sprite, x, y);
+  dibujarTexto(texto, cx, cy + flotar - 4, { escala: 5, colorContorno: COLORES.azul, alfa: activo ? 1 : 0.7 });
+  return { x, y, ancho: sprite.width, alto: sprite.height };
+}
+
+/* ---------- Pantalla de inicio ---------- */
+function dibujarTituloOndulado(texto, cx, cy, escala) {
+  const colores = COLORES_CARRIL;
+  const letras = [...texto];
+  const paso = 7 * escala; // un píxel más de aire para que los contornos no se pisen
+  const anchoTotal = (letras.length - 1) * paso + 5 * escala;
+  let x = cx - anchoTotal / 2;
+  letras.forEach((letra, i) => {
+    const centro = x + (5 * escala) / 2;
+    if (letra !== ' ') {
+      const ola = Math.round(Math.sin(tiempoGlobal * 3 + i * 0.5) * 6);
+      dibujarTexto(letra, centro, cy + ola, {
+        escala,
+        color: colores[i % colores.length],
+        contorno: Math.round(escala * 0.6),
+        colorContorno: COLORES.azulNoche,
+        sombra: Math.round(escala * 0.8),
+        colorSombra: COLORES.azulNoche,
+      });
+    }
+    x += paso;
+  });
+}
+
+function dibujarGuitarra(gx, gy) {
+  ctx.drawImage(SPRITES.guitarra, gx, gy);
+  // Cada pulso, una cuerda vibra (demostración de las 5 cuerdas)
+  const pulso = tiempoGlobal / SEG_POR_PULSO;
+  const cuerdaActiva = Math.floor(pulso) % 5;
+  const frac = fraccion(pulso);
+  const celda = 6;
+  const margen = 2;
+  const x0 = gx + (8 + margen) * celda;
+  const x1 = gx + (96 + margen) * celda;
+  for (let i = 0; i < 5; i++) {
+    const yBase = gy + (16 + i * 2 + margen) * celda + 1;
+    const amplitud = (i === cuerdaActiva ? 7 * Math.pow(1 - frac, 2) : 0) + 0.6;
+    for (let x = x0; x < x1; x += celda) {
+      const u = (x - x0) / (x1 - x0);
+      const desvio = Math.round(Math.sin(u * Math.PI) * amplitud * Math.sin(tiempoGlobal * 45 + i * 1.3));
+      ctx.fillStyle = COLORES.azulNoche;
+      ctx.fillRect(x, yBase + desvio + 2, celda, 3);
+      ctx.fillStyle = COLORES_CARRIL[i];
+      ctx.fillRect(x, yBase + desvio, celda, 3);
+    }
+  }
+}
+
+function dibujarPantallaInicio() {
+  ctx.drawImage(FONDO_PANTALLA, 0, 0);
+  dibujarDestellos(0, ALTO, 1);
+
+  dibujarTituloOndulado('CREATIVE RHYTHM', ANCHO / 2, 112, 11);
+
+  const anchoGuitarra = SPRITES.guitarra.width;
+  dibujarGuitarra(Math.round(ANCHO / 2 - anchoGuitarra / 2), 186);
+
+  // Fichas de teclas: saltan una a una al ritmo
+  const pulso = tiempoGlobal / SEG_POR_PULSO;
+  for (let i = 0; i < 5; i++) {
+    const activa = Math.floor(pulso) % 5 === i;
+    const salto = activa ? Math.round(Math.sin(fraccion(pulso) * Math.PI) * 10) : 0;
+    const cx = ANCHO / 2 + (i - 2) * 130;
+    const cy = 512 - salto;
+    dibujarSprite(SPRITES.ficha[i], cx, cy);
+    dibujarTexto(LETRAS_CARRIL[i], cx, cy - 4, { escala: 5, color: COLORES.azul, contorno: 0, sombra: 0 });
+  }
+
+  dibujarTexto('HIT THE CHORD WHEN THE NOTE REACHES THE LINE', ANCHO / 2, 592, { escala: 4 });
+  zonaBoton = dibujarBoton('START', ANCHO / 2, 682, true);
+  dibujarTexto('PRESS C TO TEST THE GUITAR', ANCHO / 2, 774, { escala: 2, alfa: 0.6, sombra: 0, contorno: 2 });
+}
+
+/* ---------- Pantalla de juego ---------- */
+function dibujarJuego() {
+  const pulso = pulsoRitmo(juego.tiempoCancion);
+
+  ctx.drawImage(FONDO_JUEGO, 0, ZONA_TOP);
+  dibujarDestellos(ZONA_TOP, ZONA_BOTTOM, 0.4);
+
+  // Carriles que laten al ritmo + luz de acierto + parpadeo gris de fallo
+  for (let i = 0; i < 5; i++) {
+    const x = i * ANCHO_CARRIL;
+    ctx.globalAlpha = 0.05 + 0.08 * pulso;
+    ctx.drawImage(LUZ_CARRIL[i], x, ZONA_TOP);
+    if (efectos.brillo[i] > 0) {
+      ctx.globalAlpha = efectos.brillo[i] * 0.6;
+      ctx.drawImage(LUZ_CARRIL[i], x, ZONA_TOP);
+    }
+    if (efectos.gris[i] > 0) {
+      const parpadeo = Math.sin(efectos.gris[i] * 18) > 0 ? 0.4 : 0.15;
+      ctx.globalAlpha = efectos.gris[i] * parpadeo;
+      ctx.drawImage(LUZ_GRIS, x, ZONA_TOP);
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // Línea de acierto punteada
+  ctx.globalAlpha = 0.35 + 0.3 * pulso;
+  ctx.fillStyle = COLORES.blanco;
+  for (let x = 0; x < ANCHO; x += 24) ctx.fillRect(x, LINEA_ACIERTO - 2, 12, 4);
+  ctx.globalAlpha = 1;
+
+  // Letras grandes de cada tecla
+  for (let i = 0; i < 5; i++) {
+    const presionado = carrilPresionado(i);
+    const salto = Math.round(efectos.rebote[i] * 8);
+    dibujarTexto(LETRAS_CARRIL[i], centroCarril(i), 682 - salto, {
+      escala: 7,
+      color: presionado ? COLORES.blanco : COLORES_CARRIL[i],
+    });
+  }
+
+  // Receptores en la línea de acierto
+  for (let i = 0; i < 5; i++) {
+    const presionado = carrilPresionado(i);
+    const sprite = presionado ? SPRITES.receptorActivo[i] : SPRITES.receptor[i];
+    dibujarSprite(sprite, centroCarril(i), LINEA_ACIERTO, 1 + 0.05 * pulso + (presionado ? 0.05 : 0));
+  }
+
+  dibujarNotas();
+  dibujarEfectos();
+  dibujarBarraSuperior();
+  dibujarBarraInferior();
+  dibujarEstrellasVolando();
+  dibujarCuentaAtras();
+}
+
+function dibujarNotas() {
+  const w = SPRITES.nota[0].width;
+  const h = SPRITES.nota[0].height;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, ZONA_TOP, ANCHO, ZONA_ALTO);
+  ctx.clip();
+  for (const nota of juego.notas) {
+    const cx = centroCarril(nota.carril);
+    if (nota.estado === 'cayendo') {
+      const y = yDeNota(nota);
+      if (y < ZONA_TOP - h || y > ZONA_BOTTOM + h) continue;
+      const rebote = Math.round(Math.sin(tiempoGlobal * 7 + nota.t * 2.3) * 3);
+      ctx.drawImage(SPRITES.nota[nota.carril], Math.round(cx - w / 2), Math.round(y - h / 2 + rebote));
+      const brillo = (Math.sin(tiempoGlobal * 9 + nota.t * 5) + 1) / 2;
+      if (brillo > 0.6) dibujarChispa(cx + w / 2 - 18, y - h / 2 + 14 + rebote, brillo);
+    } else if (nota.estado === 'perdida') {
+      // "Hoja que se va": se balancea, gira un poco y se desvanece
+      const e = nota.tEstado;
+      const x = cx + nota.dir * (e * 70 + Math.sin(e * 5) * 25);
+      const y = nota.yPerdida + e * 60 + Math.sin(e * 7) * 8;
+      const escala = 1 - e * 0.3;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, 1 - e / 1.3);
+      ctx.translate(Math.round(x), Math.round(y));
+      ctx.rotate(Math.sin(e * 4) * 0.45 * nota.dir);
+      ctx.scale(escala, escala);
+      ctx.drawImage(SPRITES.notaGris, -w / 2, -h / 2);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+function dibujarEfectos() {
+  // Anillos de destello (color según la calidad del acierto)
+  for (const a of efectos.anillos) {
+    const p = a.t / 0.4;
+    const w = Math.round(130 + p * 120);
+    const h = Math.round(90 + p * 80);
+    const g = 6;
+    const x = Math.round(a.x - w / 2);
+    const y = Math.round(a.y - h / 2);
+    ctx.globalAlpha = 1 - p;
+    ctx.fillStyle = a.color;
+    ctx.fillRect(x, y, w, g);
+    ctx.fillRect(x, y + h - g, w, g);
+    ctx.fillRect(x, y, g, h);
+    ctx.fillRect(x + w - g, y, g, h);
+  }
+  // Partículas
+  for (const p of efectos.particulas) {
+    ctx.globalAlpha = limitar(p.vida / p.vidaMax, 0, 1);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(Math.round(p.x - p.tam / 2), Math.round(p.y - p.tam / 2), p.tam, p.tam);
+  }
+  ctx.globalAlpha = 1;
+  // Textos flotantes
+  for (const tx of efectos.textos) {
+    const zoom = tx.t < 0.12 ? 1 + (0.12 - tx.t) * 4 : 1;
+    dibujarTexto(tx.texto, tx.x, tx.y - tx.t * 70, { escala: 5, color: tx.color, alfa: 1 - tx.t / 0.9, zoom });
+  }
+}
+
+function dibujarEstrellasVolando() {
+  for (const s of efectos.estrellasVolando) {
+    if (s.t < 0) continue;
+    const u = Math.min(1, s.t / s.dur);
+    const e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+    const px = (s.x0 + HUD_ESTRELLA.x) / 2;
+    const py = Math.min(s.y0, HUD_ESTRELLA.y) - 200;
+    const x = (1 - e) ** 2 * s.x0 + 2 * (1 - e) * e * px + e * e * HUD_ESTRELLA.x;
+    const y = (1 - e) ** 2 * s.y0 + 2 * (1 - e) * e * py + e * e * HUD_ESTRELLA.y;
+    const aparecer = u < 0.15 ? u / 0.15 : 1;
+    dibujarEstrellaGirando(SPRITES.estrella, x, y, s.giro + s.t * 14, aparecer * 1.2);
+  }
+}
+
+function dibujarBarraSuperior() {
+  ctx.fillStyle = COLORES.azul;
+  ctx.fillRect(0, 0, ANCHO, ZONA_TOP);
+  // Franja con los 5 colores de los carriles
+  COLORES_CARRIL.forEach((color, i) => {
+    ctx.fillStyle = color;
+    ctx.fillRect(i * ANCHO_CARRIL, ZONA_TOP - 6, ANCHO_CARRIL, 6);
+  });
+  dibujarTexto('CREATIVE RHYTHM', ANCHO / 2, 38, { escala: 6, colorContorno: COLORES.azulOscuro });
+  dibujarEstrellaGirando(SPRITES.estrellaPeq, ANCHO / 2 - 330, 38, tiempoGlobal * 2);
+  dibujarEstrellaGirando(SPRITES.estrellaPeq, ANCHO / 2 + 330, 38, tiempoGlobal * 2 + 1.5);
+}
+
+function dibujarBarraInferior() {
+  const y0 = ZONA_BOTTOM;
+  ctx.fillStyle = COLORES.azul;
+  ctx.fillRect(0, y0, ANCHO, ALTO - y0);
+  ctx.fillStyle = COLORES.azulOscuro;
+  ctx.fillRect(0, y0, ANCHO, 6);
+
+  // Progreso de la canción
+  dibujarTexto('SONG', 30, 763, { escala: 3, alinear: 'izquierda', colorContorno: COLORES.azulOscuro });
+  const bx = 180;
+  const by = 746;
+  const bw = 520;
+  const bh = 30;
+  ctx.fillStyle = COLORES.azulNoche;
+  ctx.fillRect(bx - 4, by - 4, bw + 8, bh + 8);
+  ctx.fillStyle = COLORES.azulOscuro;
+  ctx.fillRect(bx, by, bw, bh);
+  const progreso = limitar((juego.tiempoCancion - juego.inicio) / (juego.fin - juego.inicio), 0, 1);
+  const relleno = Math.floor((bw * progreso) / 8) * 8; // avanza en escalones de 8 px
+  ctx.fillStyle = COLORES.naranja;
+  ctx.fillRect(bx, by, relleno, bh);
+  ctx.fillStyle = COLORES.naranjaClaro;
+  ctx.fillRect(bx, by, relleno, 8);
+  ctx.drawImage(SPRITES.pua, Math.round(bx + relleno - SPRITES.pua.width / 2), Math.round(by + bh / 2 - SPRITES.pua.height / 2));
+
+  // Estrellas acumuladas
+  const pop = 1 + efectos.popContador * 0.3;
+  dibujarSprite(SPRITES.estrella, HUD_ESTRELLA.x, HUD_ESTRELLA.y, pop);
+  dibujarTexto(String(juego.estrellas), 810, 761, { escala: 6, color: COLORES.amarillo, alinear: 'izquierda', zoom: pop, colorContorno: COLORES.azulOscuro });
+
+  // Indicador ¡Bien! / ¡Casi!
+  const m = juego.mensaje;
+  if (m) {
+    const zoom = 1 + Math.max(0, 0.25 - m.t) * 1.6;
+    dibujarTexto(m.texto, 1280, 761, { escala: 6, color: m.color, zoom, colorContorno: COLORES.azulOscuro });
+  } else {
+    dibujarTexto('LET\'S PLAY!', 1280, 761, { escala: 5, color: COLORES.crema, alfa: 0.7, colorContorno: COLORES.azulOscuro });
+  }
+}
+
+function dibujarCuentaAtras() {
+  const t = juego.tiempoCancion;
+  if (t >= SEG_POR_PULSO) return;
+  const pulso = Math.floor(t / SEG_POR_PULSO);
+  const frac = fraccion(t / SEG_POR_PULSO);
+  const textos = { '-4': 'READY?', '-3': '3', '-2': '2', '-1': '1', '0': 'GO!' };
+  const texto = textos[String(pulso)];
+  if (!texto) return;
+  const zoom = 1 + Math.max(0, 0.25 - frac) * 1.6;
+  const alfa = pulso === 0 ? 1 - frac : 0.95;
+  dibujarTexto(texto, ANCHO / 2, 330, { escala: texto.length > 2 ? 10 : 16, color: COLORES.amarillo, alfa, zoom });
+}
+
+/* ---------- Pantalla final ---------- */
+function dibujarPantallaFinal() {
+  ctx.drawImage(FONDO_PANTALLA, 0, 0);
+  dibujarDestellos(0, ALTO, 1);
+
+  for (const c of efectos.confeti) {
+    dibujarEstrellaGirando(SPRITES.estrellaPeq, c.x + Math.sin(c.giro + c.oscila) * 20, c.y, c.giro);
+  }
+
+  const flotar = Math.round(Math.sin(tiempoGlobal * 2.5) * 6);
+  dibujarEstrellaGirando(SPRITES.estrellaGrande, ANCHO / 2, 170 + flotar, tiempoGlobal * 2.2);
+
+  dibujarTexto('YOU ARE A RHYTHM STAR!', ANCHO / 2, 300, { escala: 6 });
+
+  const mostradas = Math.min(juego.estrellas, Math.floor(juego.estrellas * Math.min(1, juego.tiempoEstado / 1.8)));
+  const palabra = mostradas === 1 ? 'STAR' : 'STARS';
+  dibujarTexto(`${mostradas} ${palabra}`, ANCHO / 2, 398, { escala: 8, color: COLORES.amarillo });
+  dibujarTexto(juego.mensajeFinal, ANCHO / 2, 480, { escala: 4, color: COLORES.crema });
+
+  const listo = juego.tiempoEstado >= ESPERA_OTRA_VEZ;
+  zonaBoton = dibujarBoton('PLAY AGAIN', ANCHO / 2, 610, listo);
+  if (listo) dibujarTexto('HIT ANY CHORD TO PLAY AGAIN', ANCHO / 2, 718, { escala: 3, color: COLORES.blanco, alfa: 0.85 });
+}
+
+/* ---------- Panel de calibración ---------- */
+function dibujarCalibracion() {
+  ctx.fillStyle = 'rgba(0,20,35,0.78)';
+  ctx.fillRect(0, 0, ANCHO, ALTO);
+
+  const px = 250;
+  const py = 110;
+  const pw = 1000;
+  const ph = 580;
+  ctx.fillStyle = COLORES.azulNoche;
+  ctx.fillRect(px - 8, py - 8, pw + 16, ph + 16);
+  ctx.fillStyle = COLORES.crema;
+  ctx.fillRect(px - 4, py - 4, pw + 8, ph + 8);
+  ctx.fillStyle = COLORES.azul;
+  ctx.fillRect(px, py, pw, ph);
+
+  dibujarTexto('CALIBRATION MODE', ANCHO / 2, 160, { escala: 5, color: COLORES.amarillo });
+  dibujarTexto('LAST KEY RECEIVED', ANCHO / 2, 222, { escala: 3, color: COLORES.crema });
+  dibujarTexto(calib.ultimoCode || '- - -', ANCHO / 2, 278, { escala: 7 });
+
+  let lineaCarril = 'HIT A GUITAR CHORD';
+  if (calib.ultimoCode) {
+    lineaCarril = calib.carril >= 0
+      ? `LANE ${calib.carril + 1} - KEY ${NOMBRES_TECLA[calib.carril]} - NOTE ${NOMBRES_NOTA[calib.carril]}`
+      : 'THIS KEY IS NOT A GAME CHORD';
+  }
+  dibujarTexto(lineaCarril, ANCHO / 2, 342, { escala: 4, color: calib.carril >= 0 || !calib.ultimoCode ? COLORES.blanco : COLORES.naranjaClaro });
+
+  for (let i = 0; i < 5; i++) {
+    const cx = ANCHO / 2 + (i - 2) * 180;
+    const presionado = carrilPresionado(i);
+    dibujarSprite(presionado ? SPRITES.receptorActivo[i] : SPRITES.receptor[i], cx, 440, presionado ? 1.08 : 1);
+    dibujarTexto(LETRAS_CARRIL[i], cx, 438, { escala: 5, color: presionado ? COLORES.blanco : COLORES_CARRIL[i] });
+    dibujarTexto(`${calib.pulsaciones[i]} HITS`, cx, 506, { escala: 2, color: COLORES.crema, sombra: 0 });
+  }
+
+  dibujarTexto(`IGNORED BOUNCES: ${calib.rebotes}    REPETITIONS: ${calib.repeticiones}`, ANCHO / 2, 568, { escala: 3 });
+  dibujarTexto(`DEBOUNCE: ${DEBOUNCE_MS} MS`, ANCHO / 2, 604, { escala: 2, color: COLORES.crema, sombra: 0 });
+  const pie = juego.estado === 'jugando' ? 'GAME PAUSED - PRESS C TO CONTINUE' : 'PRESS C TO CLOSE';
+  dibujarTexto(pie, ANCHO / 2, 652, { escala: 3, color: COLORES.naranjaClaro });
+}
+
+function dibujar() {
+  ctx.imageSmoothingEnabled = false;
+  if (juego.estado === 'inicio') dibujarPantallaInicio();
+  else if (juego.estado === 'jugando') dibujarJuego();
+  else dibujarPantallaFinal();
+  if (calib.abierta) dibujarCalibracion();
+}
+
+/* =====================================================================
+   13. ENTRADA: TECLADO (Makey Makey), RATÓN Y PANTALLA TÁCTIL
+   ===================================================================== */
+function alPulsarTecla(evento) {
+  const ahora = performance.now();
+
+  if (evento.code === 'KeyC') {
+    evento.preventDefault();
+    if (!evento.repeat) alternarCalibracion();
+    return;
+  }
+  if (evento.code === 'Escape') {
+    if (calib.abierta) alternarCalibracion();
+    else if (juego.estado !== 'inicio') volverAlInicio();
+    return;
+  }
+
+  // Datos para el panel de calibración
+  const carril = MAPA_TECLAS[evento.code];
+  calib.ultimoCode = evento.code || 'NO CODE';
+  calib.ultimoKey = evento.key;
+  calib.carril = carril === undefined ? -1 : carril;
+  if (carril === undefined) return;
+
+  evento.preventDefault(); // evita que flechas o espacio desplacen la página
+  if (evento.repeat) {     // tecla mantenida: se ignora
+    calib.repeticiones++;
+    return;
+  }
+  teclasAbajo.add(evento.code);
+
+  // Debounce: la Makey Makey puede mandar varios "toques" en pocos milisegundos
+  const anterior = ultimaPulsacion[evento.code] ?? -Infinity;
+  if (ahora - anterior < DEBOUNCE_MS) {
+    calib.rebotes++;
+    return;
+  }
+  ultimaPulsacion[evento.code] = ahora;
+  calib.pulsaciones[carril]++;
+  pulsarCarril(carril, ahora);
+}
+
+function alSoltarTecla(evento) {
+  teclasAbajo.delete(evento.code);
+  if (MAPA_TECLAS[evento.code] !== undefined) evento.preventDefault();
+}
+
+function coordenadasLogicas(evento) {
+  const r = lienzo.getBoundingClientRect();
+  return {
+    x: ((evento.clientX - r.left) * ANCHO) / r.width,
+    y: ((evento.clientY - r.top) * ALTO) / r.height,
+  };
+}
+
+function dentroDe(zona, p) {
+  return zona && p.x >= zona.x && p.x <= zona.x + zona.ancho && p.y >= zona.y && p.y <= zona.y + zona.alto;
+}
+
+function alTocarPantalla(evento) {
+  lienzo.focus({ preventScroll: true });
+  asegurarAudio();
+  if (calib.abierta) return;
+  const p = coordenadasLogicas(evento);
+  if (juego.estado === 'inicio' && dentroDe(zonaBoton, p)) {
+    empezarPartida();
+  } else if (juego.estado === 'final' && juego.tiempoEstado >= ESPERA_OTRA_VEZ && dentroDe(zonaBoton, p)) {
+    empezarPartida();
+  } else if (juego.estado === 'jugando' && p.y >= ZONA_TOP && p.y < ZONA_BOTTOM) {
+    const carril = limitar(Math.floor(p.x / ANCHO_CARRIL), 0, 4);
+    efectos.toque[carril] = 1;
+    pulsarCarril(carril, performance.now());
+  }
+}
+
+/* =====================================================================
+   14. TAMAÑO: 15:8 CON LETTERBOXING
+   ===================================================================== */
+function ajustarTamano() {
+  const ancho = escenario.clientWidth;
+  const alto = escenario.clientHeight;
+  if (!ancho || !alto) return;
+  const escala = Math.min(ancho / ANCHO, alto / ALTO);
+  lienzo.style.width = `${Math.floor(ANCHO * escala)}px`;
+  lienzo.style.height = `${Math.floor(ALTO * escala)}px`;
+}
+
+/* =====================================================================
+   15. ARRANQUE
+   ===================================================================== */
+window.addEventListener('keydown', alPulsarTecla);
+window.addEventListener('keyup', alSoltarTecla);
+window.addEventListener('blur', () => teclasAbajo.clear());
+lienzo.addEventListener('pointerdown', alTocarPantalla);
+window.addEventListener('resize', ajustarTamano);
+if ('ResizeObserver' in window) new ResizeObserver(ajustarTamano).observe(escenario);
+
+ajustarTamano();
+lienzo.focus({ preventScroll: true });
+requestAnimationFrame(bucle);
+</script>
+
+<!--
+=======================================================================
+  RITMO CREATIVO · INSTRUCCIONES PARA ADULTOS
+=======================================================================
+
+1) CONECTAR LA GUITARRA DE 5 ACORDES A LA MAKEY MAKEY
+   - Usa las pinzas de cocodrilo en la cara delantera de la Makey Makey
+     (son los símbolos que se ven en cada carril del juego):
+       acorde 1 → flecha izquierda (←) · acorde 2 → flecha arriba (↑)
+       acorde 3 → flecha abajo (↓)     · acorde 4 → flecha derecha (→)
+       acorde 5 → espacio (␣)
+   - Alternativa: el conector trasero (W A S D F G) también funciona,
+     con A S D F G en el mismo orden que las flechas.
+   - TIERRA (EARTH): el niño tiene que tocar tierra para cerrar el circuito.
+     Lo más cómodo es forrar el mástil de la guitarra con papel de aluminio
+     conectado a EARTH: la mano que sujeta el mástil hace de tierra y la otra
+     toca los acordes.
+   - Conecta la Makey Makey por USB, abre este archivo con doble clic y
+     haz un clic sobre el juego para que la ventana reciba las teclas.
+
+2) COMPROBAR ANTES DE JUGAR
+   - Pulsa C: aparece el panel de calibración con la última tecla recibida,
+     el carril al que corresponde y un contador de toques por acorde.
+   - "Rebotes ignorados" sube cuando la placa manda toques repetidos en
+     menos de 90 ms (el juego los filtra). Vuelve a pulsar C para cerrar.
+   - Esc vuelve a la pantalla de inicio.
+
+3) EDITAR LA CANCIÓN
+   - Busca "const CANCION" en el script. Cada nota es { tiempo, carril }:
+       tiempo = pulso en el que la nota llega a la línea (4 pulsos = 1 compás)
+       carril = 1 (←, Do) · 2 (↑, Re) · 3 (↓, Mi) · 4 (→, Sol) · 5 (espacio, La)
+   - Ejemplo: { tiempo: 8, carril: 3 } → en el primer pulso del compás 3 cae
+     una nota celeste y hay que tocar la flecha abajo.
+   - Deja al menos 1 pulso entre dos notas del mismo carril.
+   - Cambia BPM para ir más rápido o más lento (66 es tranquilo) y
+     TIEMPO_CAIDA para que las notas bajen más despacio.
+   - Si una nota está mal escrita, el juego la ignora y avisa en la consola
+     del navegador (F12).
+=======================================================================
+-->
+</body>
+</html>

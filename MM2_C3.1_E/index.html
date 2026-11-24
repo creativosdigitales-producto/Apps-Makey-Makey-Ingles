@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CIRCUIT LABORATORY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#2A2A2A; --frame:#E3242B;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --bg:#1C1C1C; } }
+:root[data-theme="dark"]{ --bg:#1C1C1C; }
+*,*::before,*::after{box-sizing:inherit}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{margin:0;overflow:hidden}
+body{height:100%;background:var(--bg);display:flex;align-items:center;justify-content:center;
+  font-family:"Press Start 2P",monospace}
+#stage{position:relative;box-shadow:0 0 0 4px #000,0 0 0 8px var(--frame);}
+canvas{display:block;width:100%;height:100%;image-rendering:pixelated;image-rendering:crisp-edges;touch-action:none}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c" aria-label="CIRCUIT BOARD SIMULATOR WITH ALLIGATOR CLIPS"></canvas></div>
+<script>
+const W=320,H=180,S=3;
+const cv=document.getElementById('c');cv.width=W*S;cv.height=H*S;
+const ctx=cv.getContext('2d');ctx.imageSmoothingEnabled=false;
+const stage=document.getElementById('stage');
+function fit(){const b=document.body.getBoundingClientRect();const m=20;
+  let w=b.width-m,h=w*9/16;if(h>b.height-m){h=b.height-m;w=h*16/9;}
+  stage.style.width=Math.floor(w)+'px';stage.style.height=Math.floor(h)+'px';}
+addEventListener('resize',fit);fit();
+
+const C={red:'#E3242B',redD:'#A3141A',redL:'#FF6B6F',white:'#FFFFFF',black:'#000000',ink:'#1E1E1E',
+  silver:'#CDD1D6',silverD:'#7C8189',paper:'#F2F2F2',paperD:'#DADADA',led:'#FFF4A8'};
+
+/* ---------- PRIMITIVAS PIXEL ---------- */
+function R(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(Math.round(x)*S,Math.round(y)*S,Math.round(w)*S,Math.round(h)*S);}
+function disc(cx,cy,r,c){for(let dy=-r;dy<=r;dy++){const w=Math.round(Math.sqrt(r*r-dy*dy));R(cx-w,cy+dy,2*w+1,1,c);}}
+function T(s,x,y,size,c,al='left'){ctx.font=size+'px "Press Start 2P", monospace';ctx.fillStyle=c;ctx.textAlign=al;ctx.textBaseline='top';ctx.fillText(s,Math.round(x*S),Math.round(y*S));}
+
+/* ---------- DATOS ---------- */
+const INPUTS=[
+ {id:'UP',x:60,y:40,led:[71,37],short:'UP',f:523},
+ {id:'DOWN',x:60,y:80,led:[71,79],short:'DWN',f:392},
+ {id:'LEFT',x:40,y:60,led:[37,47],short:'LFT',f:440},
+ {id:'RIGHT',x:80,y:60,led:[81,47],short:'RGT',f:494},
+ {id:'SPACE',x:122,y:60,led:[121,41],short:'SPC',f:587,big:true},
+ {id:'CLICK',x:160,y:60,led:[159,41],short:'CLK',f:659,big:true}];
+const EARTH=[56,80,104,128,152,175].map((x,i)=>({id:'E'+i,x,y:101,earth:true}));
+const PADS=[...INPUTS,...EARTH];
+const padById=id=>PADS.find(p=>p.id===id);
+const COLORS=['#F7D21E','#F2F2F2','#2DB34A','#F58220','#E3242B','#8E9298'];
+const BOARD_PORT={x:191,y:40}, LAPTOP_PORT={x:210,y:87};
+const btnSound={x:222,y:2,w:44,h:8}, btnReset={x:270,y:2,w:46,h:8};
+
+let cables,plug,powered,flags,drag=null,soundOn=true,confetti,game,prevActive,frame=0,celebrated;
+function reset(){
+  cables=COLORS.map((c,i)=>({c,ends:[{x:30+i*28,y:120,pad:null},{x:42+i*28,y:146,pad:null}]}));
+  plug={x:208,y:130,on:false};powered=false;flags={m2:false,m3:false,m4:false};
+  game={x:258,y:52,color:0,jump:0,stars:[]};prevActive={};confetti=[];celebrated=false;
+}
+reset();
+
+/* ---------- SONIDO ---------- */
+let AC=null;
+function initAudio(){if(!AC){try{AC=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(AC&&AC.state==='suspended')AC.resume();}
+function beep(f,d=.12,type='square',vol=.04){if(!soundOn||!AC)return;const t=AC.currentTime,o=AC.createOscillator(),g=AC.createGain();
+  o.type=type;o.frequency.value=f;g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(.0001,t+d);o.connect(g).connect(AC.destination);o.start(t);o.stop(t+d);}
+const snap=()=>beep(1200,.04,'square',.03);
+
+/* ---------- CIRCUITO ---------- */
+function computeActive(){
+  const node=id=>id.startsWith('E')?'EARTH':id, adj={};
+  for(const cb of cables){const [a,b]=cb.ends;if(a.pad&&b.pad){const u=node(a.pad),v=node(b.pad);
+    (adj[u]=adj[u]||[]).push(v);(adj[v]=adj[v]||[]).push(u);}}
+  const seen={EARTH:true},q=['EARTH'];
+  while(q.length){const n=q.shift();for(const m of adj[n]||[])if(!seen[m]){seen[m]=true;q.push(m);}}
+  const act={};INPUTS.forEach(p=>{if(seen[p.id])act[p.id]=true});return act;
+}
+
+/* ---------- ENTRADA ---------- */
+function toL(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*W,y:(e.clientY-r.top)/r.height*H};}
+const inBox=(b,p)=>p.x>=b.x&&p.x<=b.x+b.w&&p.y>=b.y&&p.y<=b.y+b.h;
+function findEnd(p){for(let i=cables.length-1;i>=0;i--){const cb=cables[i];for(let j=1;j>=0;j--){const e=cb.ends[j];
+  if(p.x>=e.x-5&&p.x<=e.x+5&&p.y>=e.y-2&&p.y<=e.y+15)return{cb,e};}}return null;}
+const onPlug=p=>p.x>=plug.x-15&&p.x<=plug.x+1&&p.y>=plug.y-5&&p.y<=plug.y+5;
+
+cv.addEventListener('pointerdown',e=>{
+  initAudio();const p=toL(e);
+  if(inBox(btnSound,p)){soundOn=!soundOn;beep(880);return;}
+  if(inBox(btnReset,p)){reset();beep(300,.15);return;}
+  const f=findEnd(p);
+  if(f){f.e.pad=null;cables.splice(cables.indexOf(f.cb),1);cables.push(f.cb);
+    drag={type:'end',e:f.e,ox:f.e.x-p.x,oy:f.e.y-p.y};}
+  else if(onPlug(p)){if(plug.on){plug.on=false;powered=false;beep(330,.1);setTimeout(()=>beep(165,.2),90);}
+    drag={type:'plug',ox:plug.x-p.x,oy:plug.y-p.y};}
+  if(drag){cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing';}
+});
+cv.addEventListener('pointermove',e=>{
+  const p=toL(e);
+  if(drag){const o=drag.type==='end'?drag.e:plug;
+    o.x=Math.max(5,Math.min(315,p.x+drag.ox));o.y=Math.max(4,Math.min(drag.type==='end'?162:175,p.y+drag.oy));return;}
+  cv.style.cursor=(inBox(btnSound,p)||inBox(btnReset,p))?'pointer':(findEnd(p)||onPlug(p))?'grab':'default';
+});
+function endDrag(){
+  if(!drag)return;
+  if(drag.type==='end'){const e=drag.e;let best=null,bd=8;
+    for(const pd of PADS){const d=Math.hypot(pd.x-e.x,pd.y-e.y);if(d<bd){bd=d;best=pd;}}
+    if(best){e.x=best.x;e.y=best.y;e.pad=best.id;snap();}
+  }else{
+    if(Math.hypot(plug.x-LAPTOP_PORT.x,plug.y-LAPTOP_PORT.y)<12){plug.x=LAPTOP_PORT.x;plug.y=LAPTOP_PORT.y;plug.on=true;powered=true;
+      beep(330,.1);setTimeout(()=>beep(495,.1),100);setTimeout(()=>beep(660,.18),200);}
+  }
+  drag=null;cv.style.cursor='default';
+}
+cv.addEventListener('pointerup',endDrag);cv.addEventListener('pointercancel',endDrag);
+
+/* ---------- DIBUJO ---------- */
+function curve(ax,ay,bx,by,sag,col){
+  const d=Math.hypot(bx-ax,by-ay);const mx=(ax+bx)/2,my=Math.min(Math.max(ay,by)+sag+d*.16,178);
+  const n=Math.ceil(d*1.5)+16,pts=[];
+  for(let i=0;i<=n;i++){const t=i/n,u=1-t;pts.push([u*u*ax+2*u*t*mx+t*t*bx,u*u*ay+2*u*t*my+t*t*by]);}
+  for(const [x,y] of pts)R(Math.floor(x)-1,Math.floor(y)-1,3,3,C.black);
+  for(const [x,y] of pts)R(Math.floor(x),Math.floor(y),1,1,col);
+}
+function drawClip(x,y,col,closed){
+  if(closed){R(x-2,y-1,5,7,C.black);R(x-1,y,3,6,C.silver);R(x,y+1,1,4,C.silverD);}
+  else{R(x-4,y-1,8,7,C.black);R(x-3,y,2,6,C.silver);R(x+2,y,2,6,C.silver);R(x-1,y+4,3,2,C.silver);
+    R(x-1,y,3,4,C.paper);R(x-3,y,1,1,C.silverD);R(x+3,y,1,1,C.silverD);}
+  R(x-4,y+5,9,9,C.black);R(x-3,y+6,7,7,col);R(x-2,y+7,1,5,'rgba(255,255,255,.5)');R(x-3,y+12,7,1,'rgba(0,0,0,.25)');
+}
+function drawPlug(x,y){
+  R(x-14,y-3,10,7,C.black);R(x-13,y-2,8,5,C.red);R(x-12,y-1,6,1,C.redL);
+  R(x-5,y-2,6,5,C.black);R(x-5,y-1,5,3,C.silver);R(x-3,y,2,1,C.silverD);
+}
+function drawLed(x,y,on){
+  if(on){ctx.globalAlpha=.32+.12*Math.sin(frame/8);disc(x+1,y+1,6,C.led);ctx.globalAlpha=1;
+    R(x-1,y+1,5,1,C.led);R(x+1,y-1,1,5,C.led);R(x,y,3,3,C.white);}
+  else{R(x-1,y-1,5,5,C.redD);R(x,y,3,3,'#4A0709');R(x,y,1,1,'#7A2A2C');}
+}
+function pad(p){const r=p.big?6:4;disc(p.x,p.y,r,C.silverD);disc(p.x,p.y,r-1,C.silver);disc(p.x,p.y,p.big?2:1,'#4A4A4A');}
+
+function drawBoard(){
+  R(23,28,170,88,'rgba(0,0,0,.22)');
+  R(20,24,170,88,C.redD);R(21,25,168,86,C.red);
+  for(const [hx,hy] of [[25,29],[185,29],[25,107],[185,107]])disc(hx,hy,2,C.paper);
+  R(51,29,18,62,C.white);R(29,51,62,18,C.white);R(52,30,16,60,C.red);R(30,52,60,16,C.red);
+  disc(60,60,2,C.white);
+  for(let i=0;i<3;i++){R(60-i,46+i,2*i+1,1,C.white);R(60-i,74-i,2*i+1,1,C.white);R(46+i,60-i,1,2*i+1,C.white);R(74-i,60-i,1,2*i+1,C.white);}
+  for(const cx of [122,160]){disc(cx,60,14,C.white);disc(cx,60,12,C.red);}
+  T('SPACE',122,77,8,C.white,'center');T('CLICK',160,77,8,C.white,'center');
+  R(28,94,155,15,C.white);R(29,95,153,13,C.red);T('GROUND',30,99.5,8,C.white);
+  R(186,36,6,8,C.black);R(187,37,5,6,'#9A9A9A');R(188,39,3,2,'#555');
+  T('USB',178,46,7,C.white,'center');
+  PADS.forEach(pad);
+}
+function drawLaptop(act){
+  R(214,24,92,61,C.black);R(215,25,90,59,'#2B2B2B');
+  const sx=218,sy=28,sw=84,sh=52;
+  if(!powered){R(sx,sy,sw,sh,'#0E0E0E');
+    if(Math.floor(frame/30)%2===0){T('CONNECT THE',260,46,9,C.red,'center');T('BOARD TO USB',260,55,9,C.red,'center');}
+  }else{
+    R(sx,sy,sw,sh,'#161616');
+    INPUTS.forEach((p,i)=>{const bx=219+i*14;R(bx,29,13,6,act[p.id]?C.red:'#353535');T(p.short,bx+6.5,30.5,7,act[p.id]?C.white:'#8A8A8A','center');});
+    R(sx,71,sw,9,C.red);for(let i=0;i<sw;i+=4)R(sx+i,71,2,1,C.redL);
+    game.stars.forEach(s=>R(s.x,s.y,1,1,s.c));
+    const body=[C.white,'#F7D21E','#2DB34A','#F58220'][game.color];
+    const SPR=["..XXX..",".XXXXX.","XoXXXoX","XXXXXXX","XXoooXX",".XXXXX.",".X...X."];
+    const jy=Math.round(Math.abs(Math.sin(game.jump))*7);
+    SPR.forEach((row,ry)=>[...row].forEach((ch,rx)=>{if(ch!=='.')R(game.x+rx,game.y-jy+ry,1,1,ch==='X'?body:C.black);}));
+  }
+  R(210,84,100,6,'#D6D6D6');R(210,90,100,2,'#8E8E8E');R(248,86,24,3,'#BDBDBD');
+  R(209,85,3,4,C.black);
+}
+function drawMissions(nAct){
+  R(212,100,98,76,C.black);R(213,101,96,74,C.ink);
+  T('MISSIONS',216,104,10,C.red);
+  const items=[['CONNECT THE USB',powered],['CLIP ON INPUT',flags.m2],['CLOSE TO GROUND',flags.m3],['LIGHT UP 6 LEDS',flags.m4]];
+  items.forEach(([t,d],i)=>{const y=116+i*12;R(216,y,7,7,C.white);R(217,y+1,5,5,d?C.red:C.ink);
+    if(d){R(218,y+3,1,1,C.white);R(219,y+4,1,1,C.white);R(220,y+2,1,2,C.white);}
+    T(t,226,y+0.5,8,d?C.white:'#9A9A9A');});
+  T('LEDS: '+nAct+' / 6',216,166,8,C.white);
+}
+function drawUI(hint){
+  R(0,0,W,12,C.red);T('CIRCUIT LABORATORY',5,3,12,C.white);
+  for(const [b,t] of [[btnSound,soundOn?'SOUND: ON':'SOUND: OFF'],[btnReset,'RESTART']]){
+    R(b.x,b.y,b.w,b.h,C.black);R(b.x+1,b.y+1,b.w-2,b.h-2,C.white);T(t,b.x+b.w/2,b.y+2.4,8,C.black,'center');}
+  R(0,12,W,9,C.black);T(hint,W/2,14.5,8,C.white,'center');
+}
+
+/* ---------- BUCLE ---------- */
+function loop(){
+  frame++;
+  const raw=computeActive(),act=powered?raw:{};const nAct=Object.keys(act).length;
+  INPUTS.forEach(p=>{if(act[p.id]&&!prevActive[p.id])beep(p.f,.15);});
+  const onInput=cables.some(cb=>cb.ends.some(e=>e.pad&&!e.pad.startsWith('E')));
+  if(powered&&onInput)flags.m2=true;if(nAct>0)flags.m3=true;
+  if(nAct===6&&!celebrated){flags.m4=true;celebrated=true;
+    [523,659,784,1047].forEach((f,i)=>setTimeout(()=>beep(f,.16),i*110));
+    for(let i=0;i<140;i++)confetti.push({x:Math.random()*W,y:-Math.random()*60,vx:(Math.random()-.5)*.6,vy:.5+Math.random()*1.2,c:[C.red,C.white,C.black,C.led][i%4]});}
+  // juego en pantalla
+  if(powered){const sp=.7;
+    if(act.LEFT)game.x-=sp;if(act.RIGHT)game.x+=sp;if(act.UP)game.y-=sp;if(act.DOWN)game.y+=sp;
+    game.x=Math.max(219,Math.min(294,game.x));game.y=Math.max(37,Math.min(64,game.y));
+    if(act.SPACE){game.jump+=.18;if(frame%5===0)game.stars.push({x:game.x+3+(Math.random()*8-4),y:game.y+3,life:30,c:C.led});}else game.jump=0;
+    if(act.CLICK&&!prevActive.CLICK)game.color=(game.color+1)%4;
+    if(act.CLICK&&frame%4===0)game.stars.push({x:game.x+Math.random()*7,y:game.y-2,life:24,c:C.red});
+  }
+  game.stars.forEach(s=>{s.y-=.4;s.life--;});game.stars=game.stars.filter(s=>s.life>0);
+  prevActive=act;
+
+  let hint;
+  if(!powered)hint='DRAG THE RED USB CONNECTOR TO THE COMPUTER PORT';
+  else if(!onInput)hint='BRING A CLIP TO AN INPUT: ARROWS, SPACE OR CLICK';
+  else if(nAct===0)hint='NOW CONNECT THE OTHER END OF THAT CLIP TO GROUND';
+  else if(nAct<6)hint='CIRCUIT CLOSED! LIGHT UP ALL 6 LIGHTS';
+  else hint='EXCELLENT! ALL 6 LIGHTS ARE ON';
+
+  // fondo
+  R(0,0,W,H,C.paper);for(let y=26;y<H;y+=8)for(let x=4;x<W;x+=8)R(x,y,1,1,C.paperD);
+  R(16,115,182,62,C.black);R(17,116,180,60,'#E4E4E4');
+  T('ALLIGATOR CLIPS',20,169.5,7,'#8A8A8A');
+  drawMissions(nAct);drawLaptop(act);drawBoard();
+  // cable usb
+  curve(BOARD_PORT.x,BOARD_PORT.y,plug.x-13,plug.y,6,C.red);drawPlug(plug.x,plug.y);
+  // pinzas
+  for(const cb of cables){const [a,b]=cb.ends;curve(a.x,a.y+13,b.x,b.y+13,8,cb.c);
+    drawClip(a.x,a.y,cb.c,!!a.pad);drawClip(b.x,b.y,cb.c,!!b.pad);}
+  // leds encima
+  drawLed(182,28,powered);
+  INPUTS.forEach(p=>drawLed(p.led[0],p.led[1],!!act[p.id]));
+  // confeti
+  confetti.forEach(c=>{c.x+=c.vx;c.y+=c.vy;R(c.x,c.y,2,2,c.c);});confetti=confetti.filter(c=>c.y<H);
+  drawUI(hint);
+  requestAnimationFrame(loop);
+}
+(document.fonts?document.fonts.ready:Promise.resolve()).then(()=>requestAnimationFrame(loop));
+</script>
+</body>
+</html>
